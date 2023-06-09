@@ -1,11 +1,13 @@
-import json
-import time
-import random
 import asyncio
+import json
+import random
+import time
+
 import websockets
+from django.core.management.base import BaseCommand
+
 from config.celery_app import app
 from contract_center.contract.models import Sync
-from django.core.management.base import BaseCommand
 
 
 async def connect_with_timeout(url: str, timeout: int):

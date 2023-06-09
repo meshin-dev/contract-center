@@ -1,7 +1,8 @@
 import json
-from web3.types import HexBytes
 from typing import List, Union, Dict
+
 from web3.datastructures import AttributeDict
+from web3.types import HexBytes
 
 
 class HexBytesEncoder(json.JSONEncoder):

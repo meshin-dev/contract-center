@@ -1,8 +1,10 @@
 import time
-from typing import Dict, Type, List
-from django.dispatch import receiver
 from dataclasses import dataclass, field
+from typing import Dict, Type, List
+
 from dataclasses_json import dataclass_json
+from django.dispatch import receiver
+
 from contract_center.contract.models import Sync
 from contract_center.contract.signals import contract_new_events_signal
 from contract_center.ssv_network.models.events import event_models, EventModel

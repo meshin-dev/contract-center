@@ -1,7 +1,8 @@
 import json
 from typing import Union
-from web3.contract import Contract
+
 from web3 import Web3, HTTPProvider, WebsocketProvider
+from web3.contract import Contract
 
 
 class Web3Contract:

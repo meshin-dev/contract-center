@@ -1,8 +1,8 @@
-from enum import Enum
+from typing import Union
+
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.urls import reverse
-from typing import Union, Dict, Type
-from django.core.exceptions import ObjectDoesNotExist
 from django.utils.translation import gettext_lazy as _
 
 

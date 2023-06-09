@@ -1,9 +1,10 @@
-from django.db import models
 from django.contrib import admin
 from django.contrib.admin import ModelAdmin
-from contract_center.contract.models import Sync
+from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django_json_widget.widgets import JSONEditorWidget
+
+from contract_center.contract.models import Sync
 
 
 @admin.register(Sync)
@@ -23,4 +24,3 @@ class SyncAdmin(ModelAdmin):
     formfield_overrides = {
         models.JSONField: {'widget': JSONEditorWidget},
     }
-

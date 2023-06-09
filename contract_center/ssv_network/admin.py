@@ -1,8 +1,9 @@
-from django.db import models
 from django.contrib import admin
 from django.contrib.admin import ModelAdmin
+from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django_json_widget.widgets import JSONEditorWidget
+
 from contract_center.ssv_network.models import TestnetV4Operator, MainnetV4Operator
 from contract_center.ssv_network.models.events import TestnetV4Event, MainnetV4Event
 
@@ -44,7 +45,7 @@ class TestnetV4OperatorAdmin(ModelAdmin):
     fieldsets = (
         (_("Data"), {"fields": (
             "operatorId",
-            "version", "network", "ownerAddress", "blockNumber", "transactionIndex", "errors", )}),
+            "version", "network", "ownerAddress", "blockNumber", "transactionIndex", "errors",)}),
     )
     list_display = ["ownerAddress", "blockNumber"]
     search_fields = ["ownerAddress", "blockNumber"]
@@ -56,7 +57,7 @@ class MainnetV4OperatorAdmin(ModelAdmin):
     fieldsets = (
         (_("Data"), {"fields": (
             "operatorId",
-            "version", "network", "ownerAddress", "blockNumber", "transactionIndex", "errors", )}),
+            "version", "network", "ownerAddress", "blockNumber", "transactionIndex", "errors",)}),
     )
     list_display = ["ownerAddress", "blockNumber"]
     search_fields = ["ownerAddress", "blockNumber"]
