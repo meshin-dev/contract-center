@@ -106,7 +106,7 @@ def fetch_events(self, context: str = 'periodic', *args, **kwargs):
                 'lock': lock_name
             }
 
-        logger.debug(f'[{context}] Acquired the lock: {lock_name}')
+        logger.debug(f'{sync.name} [{context}]: Acquired the lock: {lock_name}')
 
         # Don't count the time spend on database interaction or lock waiting
         lock.reacquire()
@@ -198,6 +198,19 @@ def fetch_events(self, context: str = 'periodic', *args, **kwargs):
         # Collect receivers results
         results: List[ContractEventsReceiverResult] = new_events_signal_future.result()
 
+        if not len(results):
+            logger.warning(f'{sync.name} [{context}]: No results from receivers. '
+                           f'Looks like nobody is listening for new events')
+            return {
+                'context': context,
+                'sync_kwargs': sync_kwargs,
+                'saved_events': 0,
+                'error': f'Nobody is listening for new events',
+                'lock': lock_name,
+                'block_from': from_block,
+                'block_to': to_block,
+            }
+
         # Reacquire the lock after few final save iterations
         lock.reacquire()
 
@@ -205,7 +218,8 @@ def fetch_events(self, context: str = 'periodic', *args, **kwargs):
         saved_new_events = False
         for result in results:
             result = result[1]
-            saved_new_events += bool(result.saved_total)
+            saved_new_events = bool(result.saved_total)
+            break
 
         # Even if receivers saved last synced block number it's ok to do that
         # because next round of sync will be just continuing from where receiver failed
@@ -237,7 +251,7 @@ def fetch_events(self, context: str = 'periodic', *args, **kwargs):
         }
         return response
     except Exception as taskError:
-        logger.error(f'Can not run sync task')
+        logger.error(f'{sync.name} [{context}]: Can not run sync task')
         logger.exception(taskError)
         return {
             'context': context,
