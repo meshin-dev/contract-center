@@ -12,11 +12,13 @@ from contract_center.ssv_network.models.events import event_models, EventModel
 from contract_center.ssv_network.models.operators import OperatorModel, operator_models
 
 
-@celery_app.task()
-def process_raw_events(version: str, network: str, context: str = 'periodic', *args, **kwargs):
+@celery_app.task(
+    name='ssv_network.process_new_events'
+)
+def process_new_events(version: str, network: str, context: str = 'periodic', *args, **kwargs):
     """
-    Task to go over all raw events which has been not processed yet and process them
-    in chronological order
+    TODO: Task to go over all raw events which has been not processed yet and process them
+            in chronological order
     :param version:
     :param network:
     :param context:
