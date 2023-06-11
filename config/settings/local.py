@@ -87,7 +87,7 @@ LOGGING = {
                 'DEBUG': 'blue',
                 'INFO': 'green',
                 'WARNING': 'yellow,bg_black',
-                'ERROR': 'red,bg_red',
+                'ERROR': 'black,bg_red',
                 'CRITICAL': 'red,bg_white',
                 'EXCEPTION': 'red,bg_white',
             },
