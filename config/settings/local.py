@@ -1,3 +1,4 @@
+import colorlog
 from .base import *  # noqa
 from .base import env
 
@@ -21,7 +22,10 @@ EMAIL_BACKEND = env("DJANGO_EMAIL_BACKEND", default="django.core.mail.backends.c
 # WhiteNoise
 # ------------------------------------------------------------------------------
 # http://whitenoise.evans.io/en/latest/django.html#using-whitenoise-in-development
-INSTALLED_APPS = ["whitenoise.runserver_nostatic"] + INSTALLED_APPS  # noqa: F405
+INSTALLED_APPS = [
+    "colorlog",
+    "whitenoise.runserver_nostatic",
+] + INSTALLED_APPS  # noqa: F405
 
 
 # django-debug-toolbar
@@ -60,3 +64,37 @@ INSTALLED_APPS += ["django_extensions"]  # noqa: F405
 CELERY_TASK_EAGER_PROPAGATES = True
 # Your stuff...
 # ------------------------------------------------------------------------------
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'colored',
+        },
+    },
+    'formatters': {
+        'colored': {
+            '()': 'colorlog.ColoredFormatter',
+            'format': '%(log_color)s'
+                      '[%(levelname)s]'
+                      '[%(asctime)s]'
+                      '[pid:%(process)d]'
+                      '[tid:%(thread)d]'
+                      '[%(module)s] %(message)s',
+            'log_colors': {
+                'DEBUG': 'blue',
+                'INFO': 'green',
+                'WARNING': 'yellow,bg_black',
+                'ERROR': 'red,bg_red',
+                'CRITICAL': 'red,bg_white',
+                'EXCEPTION': 'red,bg_white',
+            },
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'DEBUG',
+    },
+}

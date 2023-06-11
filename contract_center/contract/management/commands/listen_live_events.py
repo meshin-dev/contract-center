@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import random
 import time
 
@@ -8,6 +9,8 @@ from django.core.management.base import BaseCommand
 
 from config.celery_app import app
 from contract_center.contract.models import Sync
+
+logger = logging.getLogger(__name__)
 
 
 async def connect_with_timeout(url: str, timeout: int):
@@ -33,49 +36,51 @@ async def live_events_listener(sync: Sync, connect_timeout: int, recv_timeout: i
             # Establish a websocket connection
             ws = await connect_with_timeout(sync.node_websocket_address, connect_timeout)
             try:
-                await ws.send(json.dumps({
+                connection_options = {
                     "id": 1,
                     "method": "eth_subscribe",
                     "params": ["logs", {
                         "address": [sync.contract_address],
                     }]
-                }))
+                }
+                logger.debug(f'Contract events live listener connection options: {connection_options}')
+                await ws.send(json.dumps(connection_options))
 
-                print(f'{sync.name}: Connecting to contract address: {sync.contract_address}')
+                logger.info(f'{sync.name}: Connecting...')
                 subscription_response = await asyncio.wait_for(ws.recv(), timeout=recv_timeout)
-                print(f'{sync.name}: Subscription result: {subscription_response}')
+                logger.info(f'{sync.name}: Subscription result: {subscription_response}')
 
                 # Start receiving updates with timeout
                 while True:
                     try:
                         message = await asyncio.wait_for(ws.recv(), timeout=recv_timeout)
-                        print(f'{sync.name}: Received new event: {message}')
+                        logger.info(f'{sync.name}: Received new event: {message}')
 
                         # Trigger an immediate sync task
                         task_params = dict(
-                            name='contract.sync_events',
+                            name='contract.fetch_events',
                             args=[],
                             kwargs=dict(
                                 context='live',
                                 name=sync.name,
                             )
                         )
-                        print(f'{sync.name}: Triggering immediate sync: {task_params}')
+                        logger.info(f'{sync.name}: Triggering immediate sync: {task_params}')
                         app.send_task(**task_params)
-                        print(f'{sync.name}: Triggered successfully')
+                        logger.info(f'{sync.name}: Triggered successfully')
                     except websockets.ConnectionClosedError:
-                        print(f"{sync.name}: Connection closed. Retrying...")
+                        logger.error(f"{sync.name}: Connection closed. Retrying...")
                         break
                     except asyncio.TimeoutError:
-                        print(f"{sync.name}: Receive operation timed out. Retrying...")
+                        logger.debug(f"{sync.name}: Receive operation timed out. Retrying...")
             finally:
                 await ws.close()
         except websockets.ConnectionClosedError:
-            print(f"{sync.name}: Connection closed. Retrying...")
+            logger.error(f"{sync.name}: Connection closed. Retrying...")
         except asyncio.TimeoutError:
-            print(f"{sync.name}: Connect operation timed out. Retrying...")
+            logger.error(f"{sync.name}: Connect operation timed out. Retrying...")
         except Exception as e:
-            print(f"{sync.name}: An error occurred: {e}")
+            logger.error(f"{sync.name}: An error occurred: {e}")
 
 
 class Command(BaseCommand):
@@ -90,7 +95,7 @@ class Command(BaseCommand):
             syncs = Sync.objects.filter(enabled=True)
             if len(syncs) > 0:
                 break
-            print(f'No syncs available to start. Retrying in a minute...')
+            logger.warning(f'No syncs available to start. Retrying in a minute...')
             time.sleep(60)
 
         while True:

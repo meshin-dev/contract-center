@@ -6,6 +6,7 @@ volumes:
 
 services:
   django: &django
+    tty: true
     build:
       context: .
       dockerfile: ./compose/local/django/Dockerfile
@@ -23,6 +24,7 @@ services:
     command: /start
 
   postgres:
+    tty: true
     build:
       context: .
       dockerfile: ./compose/production/postgres/Dockerfile
@@ -34,6 +36,7 @@ services:
       - ./.envs/.local/.postgres
 
   docs:
+    tty: true
     image: contract_center_local_docs
     build:
       context: .
@@ -86,6 +89,7 @@ services:
     command: /start-flower
 
   node:
+    tty: true
     build:
       context: .
       dockerfile: ./compose/local/node/Dockerfile

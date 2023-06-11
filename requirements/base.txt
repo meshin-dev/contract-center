@@ -34,3 +34,5 @@ websockets~=11.0.3
 torch~=2.0.1
 django-json-widget==1.1.1
 dataclasses_json~=0.5.7
+rich~=13.4.1
+colorlog~=6.7.0

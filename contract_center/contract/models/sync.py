@@ -1,3 +1,4 @@
+import logging
 from typing import Union
 
 from django.core.exceptions import ObjectDoesNotExist
@@ -5,35 +6,10 @@ from django.db import models
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
-
-# TODO: move this to sync model events list field
-# class EventV4(Enum):
-#     EVENT_OPERATOR_ADDED = 'OperatorAdded'
-#     EVENT_OPERATOR_REMOVED = 'OperatorRemoved'
-#     EVENT_OPERATOR_FEE_EXECUTION = 'OperatorFeeExecuted'
-#     EVENT_OPERATOR_FEE_DECLARATION = 'OperatorFeeDeclared'
-#     EVENT_ACCOUNT_LIQUIDATED = 'ClusterLiquidated'
-#     EVENT_ACCOUNT_ENABLED = 'ClusterReactivated'
-#     EVENT_VALIDATOR_ADDED = 'ValidatorAdded'
-#     EVENT_VALIDATOR_REMOVED = 'ValidatorRemoved'
-#     EVENT_CLUSTER_DEPOSITED = 'ClusterDeposited'
-#     EVENT_CLUSTER_WITHDRAWN = 'ClusterWithdrawn'
-#     EVENT_ACCOUNT_FEE_RECIPIENT_ADD = 'FeeRecipientAddressUpdated'
-#
-#
-# # Use both upper and lower case to not care about it
-# event_versions: Dict[str, Type[Enum]] = dict(
-#     v4=EventV4,
-#     V4=EventV4,
-# )
+logger = logging.getLogger(__name__)
 
 
 class Sync(models.Model):
-    """
-    0x45B831727DC96035e6a2f77AAAcE4835195a54Af
-    https://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA
-    wss://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA
-    """
     name = models.SlugField(
         _('Name'),
         max_length=255,
@@ -119,6 +95,7 @@ class Sync(models.Model):
         try:
             return Sync.objects.get(*args, **kwargs)
         except(KeyError, ValueError, ObjectDoesNotExist):
+            logger.error(f'Can not find sync object with params: {args}, {kwargs}')
             return None
 
     def get_absolute_url(self) -> str:
