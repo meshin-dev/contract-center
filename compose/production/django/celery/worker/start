@@ -1,8 +1,36 @@
 #!/bin/bash
 
 set -o errexit
-set -o pipefail
 set -o nounset
 
+# Default values
 
-exec celery -A config.celery_app worker -P threads -l INFO
+# This enables automatic scaling of the worker.
+# This sets the number of worker processes or threads to run concurrently.
+CONCURRENCY="1"
+WORKER_NAME="default"
+
+# Parse command line options
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --worker-name=*) WORKER_NAME="${1#*=}" ;;
+    --concurrency=*) CONCURRENCY="${1#*=}" ;;
+    *) echo "Invalid option: $1" >&2
+       exit 1 ;;
+  esac
+  shift
+done
+
+# Validate required parameters
+if [[ -z $WORKER_NAME || -z $CONCURRENCY ]]; then
+  echo "Missing required parameters."
+  echo "Usage: script.sh --worker-name=<worker-name> --concurrency=<concurrency>"
+  exit 1
+fi
+
+# --without-mingle: This disables the worker from automatically joining the worker pool.
+#                   Without mingle, the worker will start independently.
+# --without-gossip: This disables the worker from automatically discovering other workers via gossip.
+#                   Gossip is a communication mechanism between workers.
+
+exec watchfiles --filter python celery.__main__.main --args "-A config.celery_app worker -P threads -l INFO --concurrency=$CONCURRENCY  -n worker.$WORKER_NAME -Q "queue_$WORKER_NAME" --without-mingle --without-gossip"

@@ -67,7 +67,8 @@ def reacquire_lock(future: Future, lock: Lock, context: str, sync: Sync):
 
 @celery_app.task(
     bind=True,
-    name='contract.fetch_events'
+    name='contract.fetch_events',
+    queue='queue_events_fetch'
 )
 def fetch_events(self, context: str = 'periodic', *args, **kwargs):
     # Find appropriate sync info

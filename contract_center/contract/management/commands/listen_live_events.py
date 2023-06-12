@@ -59,6 +59,7 @@ async def live_events_listener(sync: Sync, connect_timeout: int, recv_timeout: i
                         # Trigger an immediate sync task
                         task_params = dict(
                             name='contract.fetch_events',
+                            queue='queue_events_fetch',
                             args=[],
                             kwargs=dict(
                                 context='live',
