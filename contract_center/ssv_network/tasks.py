@@ -13,7 +13,8 @@ from contract_center.ssv_network.models.operators import OperatorModel, operator
 
 
 @celery_app.task(
-    name='ssv_network.process_new_events'
+    name='ssv_network.process_new_events',
+    queue='queue_events_process'
 )
 def process_new_events(version: str, network: str, context: str = 'periodic', *args, **kwargs):
     """

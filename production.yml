@@ -48,10 +48,23 @@ services:
   redis:
     image: redis:6
 
-  celeryworker:
+  worker_events_fetch:
     <<: *django
-    image: contract_center_production_celeryworker
-    command: /start-celeryworker
+    image: contract_center_local_worker_events_fetch
+    depends_on:
+      - redis
+      - postgres
+    ports: [ ]
+    command: /start-celeryworker --worker-name=events_fetch --concurrency=2
+
+  worker_events_process:
+    <<: *django
+    image: contract_center_local_worker_events_process
+    depends_on:
+      - redis
+      - postgres
+    ports: [ ]
+    command: /start-celeryworker --worker-name=events_fetch --concurrency=2
 
   live_events_listener:
     <<: *django
