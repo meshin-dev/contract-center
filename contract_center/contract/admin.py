@@ -16,6 +16,7 @@ class SyncAdmin(ModelAdmin):
         (_("Eth Node"), {"fields": ("node_http_address", "node_websocket_address",)}),
         (_("Connection"), {"fields": ("live_events_connect_timeout", "live_events_read_timeout",)}),
         (_("Extra"), {"fields": ("meta", "event_names",)}),
+        (_("Date & Time"), {"fields": ("createdAt", "updatedAt",)}),
     )
     list_display = ["name", "enabled", ]
     search_fields = ["contract_address", "contract_abi", "node_http_address", "node_websocket_address", "meta",
@@ -24,3 +25,7 @@ class SyncAdmin(ModelAdmin):
     formfield_overrides = {
         models.JSONField: {'widget': JSONEditorWidget},
     }
+    readonly_fields = (
+        "createdAt",
+        "updatedAt",
+    )

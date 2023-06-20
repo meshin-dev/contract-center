@@ -1,56 +1,57 @@
 import logging
+import time
 from typing import Dict, Type, List
 
 from django.dispatch import receiver
 
-from contract_center.contract.models import Sync
-from contract_center.contract.receivers import ContractEventsReceiverResult
+from contract_center.contract.receivers import EventReceiverResult
 from contract_center.contract.signals import contract_fetched_events_signal
-from contract_center.ssv_network.models.events import event_models, EventModel
+from contract_center.contract.tasks import EventsFetchTask
+from contract_center.ssv_network.models.events import get_event_model, EventModel
+from contract_center.ssv_network.tasks import EventsProcessTask
 
 logger = logging.getLogger(__name__)
 
 
 @receiver(contract_fetched_events_signal)
-def save_raw_events(sender, context: str, sync: Sync, events: List[Dict], **kwargs) -> ContractEventsReceiverResult:
+def contract_fetched_events_receiver(
+    sender: Type[EventsFetchTask],
+    instance: EventsFetchTask,
+    params: Dict,
+    events: List[Dict],
+    **kwargs
+) -> EventReceiverResult:
     """
-    [
-  "OperatorAdded",
-  "OperatorRemoved",
-  "OperatorFeeExecuted",
-  "OperatorFeeDeclared",
-  "ClusterLiquidated",
-  "ClusterReactivated",
-  "ValidatorAdded",
-  "ValidatorRemoved",
-  "ClusterDeposited",
-  "ClusterWithdrawn",
-  "FeeRecipientAddressUpdated"
-]
-    0x45B831727DC96035e6a2f77AAAcE4835195a54Af
-    https://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA
-    wss://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA
+    Saving raw events from a contract.
+    When events are saved - it triggers processing events task.
 
-    :param context:
-    :param events:
     :param sender:
-    :param sync:
+    :param instance:
+    :param params:
+    :param events:
     :param kwargs:
     :return:
     """
     # Not going to save events for other than ssv.network modules
-    result = ContractEventsReceiverResult(
-        receiver=f'{__name__}.{save_raw_events.__name__}'
+    result = EventReceiverResult(
+        receiver=f'{__name__}.{contract_fetched_events_receiver.__name__}'
     )
-    if not sync.name.startswith('ssv_network'):
+    if not instance.sync.name.startswith('ssv_network'):
         return result
 
-    version = str(sync.meta.get('version'))
-    network = str(sync.meta.get('network'))
-    event_model: Type[EventModel] = event_models.get(f'{version}_{network}')
+    version = str(instance.sync.meta.get('version'))
+    assert version, 'Version in Sync.meta is required'
 
-    logger.debug(f'Found model for version {version} and network {network}: {event_model}')
+    network = str(instance.sync.meta.get('network'))
+    assert network, 'Network in Sync.meta is required'
 
+    event_model: Type[EventModel] = get_event_model(version, network)
+    assert event_model, f'EventModel for version {version} and network {network} is not found'
+
+    instance.log(f'Found model for version {version} and network {network}: {event_model}', log_method=logger.debug)
+
+    at_least_one_created = False
+    last_time = time.time() - 1
     for event in events:
         _, created = event_model.objects.get_or_create(
             transactionHash=event['transactionHash'],
@@ -60,19 +61,46 @@ def save_raw_events(sender, context: str, sync: Sync, events: List[Dict], **kwar
                 **event,
             )
         )
+        at_least_one_created = at_least_one_created or created
         if created:
             result.saved_events[event['event']] = result.saved_events.get(event['event']) or 0
             result.saved_events[event['event']] += 1
 
-            # TODO: start raw events processor celery task specific to this module
-            # TODO: that celery task should work 1 instance at a time only specifically for ssv.network events
-
             # Save last synced block number after each raw event saved.
             # Do it anyway so that on a next raw events fetch task it will continue from
             # the place where it was saved successfully last time
-            sync.last_synced_block_number = event['blockNumber'] - 1
-            sync.save()
+            instance.sync.last_synced_block_number = event['blockNumber'] - 1
+            instance.sync.save()
             result.saved_total += 1
-            logger.info(f'{sync.name} [{context}]: Saved new event: {event}')
+            instance.log(
+                f'{instance.sync.name} [{instance.context}]: Saved new raw event: {event}',
+                log_method=logger.debug
+            )
+
+            # Trigger periodic task to process events at least once every second
+            if time.time() - last_time >= 1:
+                instance.log(
+                    f'Triggering event processing task..',
+                    log_method=logger.debug
+                )
+                EventsProcessTask(
+                    kwargs=dict(
+                        version=version,
+                        network=network
+                    )
+                ).send()
+                last_time = time.time()
+
+    # Trigger anyway in the end task to process events
+    if at_least_one_created:
+        EventsProcessTask(
+            kwargs=dict(
+                version=version,
+                network=network
+            )
+        ).send()
+
+    instance.sync.last_synced_block_number = params.get('block_to') - instance.block_from_back_offset
+    instance.sync.save()
 
     return result

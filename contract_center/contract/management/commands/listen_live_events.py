@@ -7,8 +7,8 @@ import time
 import websockets
 from django.core.management.base import BaseCommand
 
-from config.celery_app import app
 from contract_center.contract.models import Sync
+from contract_center.contract.tasks import EventsFetchTask
 
 logger = logging.getLogger(__name__)
 
@@ -55,20 +55,13 @@ async def live_events_listener(sync: Sync, connect_timeout: int, recv_timeout: i
                     try:
                         message = await asyncio.wait_for(ws.recv(), timeout=recv_timeout)
                         logger.info(f'{sync.name}: Received new event: {message}')
-
-                        # Trigger an immediate sync task
-                        task_params = dict(
-                            name='contract.fetch_events',
-                            queue='queue_events_fetch',
-                            args=[],
+                        params = EventsFetchTask(
                             kwargs=dict(
                                 context='live',
                                 name=sync.name,
                             )
-                        )
-                        logger.info(f'{sync.name}: Triggering immediate sync: {task_params}')
-                        app.send_task(**task_params)
-                        logger.info(f'{sync.name}: Triggered successfully')
+                        ).send()
+                        logger.info(f'{sync.name}: Triggered live sync: {params}')
                     except websockets.ConnectionClosedError:
                         logger.error(f"{sync.name}: Connection closed. Retrying...")
                         break

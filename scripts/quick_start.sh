@@ -17,6 +17,8 @@ function run_command_based_on_answer() {
     fi
 }
 
+run_command_based_on_answer "Should remove all testnet data?" "docker-compose -f local.yml run --rm django python manage.py flush events.TestnetV4Event"
+run_command_based_on_answer "Should build and start all containers?" "docker-compose -f local.yml up -d --build"
 run_command_based_on_answer "Should start all containers?" "docker-compose -f local.yml up -d"
 run_command_based_on_answer "Should make migrations?" "docker-compose -f local.yml run --rm django python manage.py makemigrations"
 run_command_based_on_answer "Should migrate?" "docker-compose -f local.yml run --rm django python manage.py migrate"

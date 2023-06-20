@@ -10,6 +10,25 @@ logger = logging.getLogger(__name__)
 
 
 class Sync(models.Model):
+    """
+        [
+  "OperatorAdded",
+  "OperatorRemoved",
+  "OperatorFeeExecuted",
+  "OperatorFeeDeclared",
+  "ClusterLiquidated",
+  "ClusterReactivated",
+  "ValidatorAdded",
+  "ValidatorRemoved",
+  "ClusterDeposited",
+  "ClusterWithdrawn",
+  "FeeRecipientAddressUpdated"
+]
+    0x45B831727DC96035e6a2f77AAAcE4835195a54Af
+    https://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA
+    wss://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA
+
+    """
     name = models.SlugField(
         _('Name'),
         max_length=255,
@@ -80,6 +99,8 @@ class Sync(models.Model):
         default=list,
         help_text=_('Array of event names that should be synced')
     )
+    createdAt = models.DateTimeField(auto_now_add=True)
+    updatedAt = models.DateTimeField(auto_now=True)
 
     class Meta:
         pass

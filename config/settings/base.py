@@ -83,6 +83,7 @@ LOCAL_APPS = [
     "contract_center.users",
     "contract_center.contract",
     "contract_center.ssv_network",
+    "contract_center.ssv_network.operators",
 ]
 # https://docs.djangoproject.com/en/dev/ref/settings/#installed-apps
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
