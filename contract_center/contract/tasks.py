@@ -327,10 +327,8 @@ class EventsFetchTask(SmartTask):
             ).to_dict()
         finally:
             try:
-                if self.get_lock().locked() and self.get_lock().owned():
+                if self.get_lock().locked() and hasattr(self.get_lock().local, 'token') and self.get_lock().owned():
                     self.get_lock().release()
-            # except AttributeError:
-            #     pass
             except Exception as e:
                 self.log('Can not release lock')
                 self.log(e)
