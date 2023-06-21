@@ -58,7 +58,7 @@ function main_menu() {
 
 function containers_menu() {
     echo "Containers:"
-    options=("Rebuild and start all" "Start all" "Stop all" "Go back")
+    options=("Rebuild and start all" "Start all" "Stop all" "Scale workers" "Go back")
     select opt in "${options[@]}"
     do
         case $opt in
@@ -74,6 +74,14 @@ function containers_menu() {
                 ;;
             "Stop all")
                 docker-compose -f local.yml down
+                containers_menu
+                break
+                ;;
+            "Scale workers")
+                read -p "Enter the number of fetch workers to scale: " workers_fetch
+                read -p "Enter the number of process workers to scale: " workers_process
+                read -p "Enter the number of live events listener workers to scale: " workers_live
+                docker-compose -f local.yml up -d --scale worker_events_fetch=$workers_fetch --scale worker_events_process=$workers_process --scale live_events_listener=$workers_live
                 containers_menu
                 break
                 ;;
