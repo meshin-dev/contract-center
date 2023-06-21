@@ -228,6 +228,14 @@ class EventsFetchTask(SmartTask):
             if isinstance(self.sync, EventsFetchTaskResult):
                 return self.sync.to_dict()
 
+            if not bool(self.sync.enabled):
+                return EventsFetchTaskResult(
+                    task=self.name,
+                    context=self.context,
+                    lock=self.get_lock_name(),
+                    reason=f'Sync disabled: {self.sync.name}',
+                ).to_dict()
+
             # Try to acquire the lock for this task
             lock_result = self.lock_acquire()
             if lock_result:
@@ -277,7 +285,7 @@ class EventsFetchTask(SmartTask):
 
             if not len(events):
                 self.sync.last_synced_block_number = block_to - self.block_from_back_offset
-                self.sync.save()
+                self.sync.save(update_fields=['last_synced_block_number'])
                 can_self_call = True
                 return EventsFetchTaskResult(
                     task=self.name,
