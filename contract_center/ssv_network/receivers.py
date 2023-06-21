@@ -69,11 +69,12 @@ def contract_fetched_events_receiver(
             # Save last synced block number after each raw event saved.
             # Do it anyway so that on a next raw events fetch task it will continue from
             # the place where it was saved successfully last time
-            instance.sync.last_synced_block_number = event['blockNumber'] - 1
+            instance.sync.last_synced_block_number = event['blockNumber']
             instance.sync.save()
+
             result.saved_total += 1
             instance.log(
-                f'{instance.sync.name} [{instance.context}]: Saved new raw event: {event}',
+                f'Saved new raw event: {event}',
                 log_method=logger.debug
             )
 
@@ -100,7 +101,7 @@ def contract_fetched_events_receiver(
             )
         ).send()
 
-    instance.sync.last_synced_block_number = params.get('block_to') - instance.block_from_back_offset
+    instance.sync.last_synced_block_number = params.get('block_to')
     instance.sync.save()
 
     return result

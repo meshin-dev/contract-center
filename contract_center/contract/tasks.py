@@ -29,8 +29,9 @@ class EventsFetchTaskResult:
     lock: str
     error: str = ''
     reason: str = ''
-    block_to: int = 0
     block_from: int = 0
+    block_to: int = 0
+    current_block: int = 0
     total_events: int = 0
     context: dict = field(default_factory=dict)
     results: list = field(default_factory=list)
@@ -43,10 +44,10 @@ class SmartTask(Task):
     lock_ttl_sec = 15
 
     # How long to wait trying to acquire a lock before giving up
-    lock_blocking_timeout_sec = 5
+    lock_blocking_timeout_sec = 1
 
     # Period in seconds to reacquire a lock on a task if its long-lasting
-    process_reacquire_each_sec = 5
+    process_reacquire_each_sec = 0.3
 
     # Default cache client is RedisCacheClient
     cache: DefaultClient = caches['default']
@@ -66,7 +67,7 @@ class SmartTask(Task):
         return self.lock
 
     def get_lock_name(self) -> str:
-        return f'{self.name}.{self.__class__.__name__}'
+        return f'{self.name}.{self.sync.name}'
 
     def lock_acquire(self) -> Union[None, EventsFetchTaskResult]:
         """
@@ -117,7 +118,7 @@ class SmartTask(Task):
             try:
                 self.get_lock().reacquire()
                 self.log(f'Reacquired lock during long lasting synchronization...', log_method=logging.debug)
-            except Exception as e:
+            except:
                 raise
             time.sleep(self.process_reacquire_each_sec)
 
@@ -136,9 +137,9 @@ class EventsFetchTask(SmartTask):
     queue = 'queue_events_fetch'
 
     sync: Sync = None
-    web3_contract: Web3Contract = None
     block_from_back_offset = 2
     minimum_blocks_to_fetch = 10
+    web3_contract: Web3Contract = None
 
     @property
     def contract(self) -> Web3Contract:
@@ -147,6 +148,7 @@ class EventsFetchTask(SmartTask):
         :return:
         """
         self.web3_contract = self.web3_contract or Web3Contract(
+            name=self.sync.name,
             node_http_address=self.sync.node_http_address,
             node_websocket_address=self.sync.node_websocket_address,
             contract_address=self.sync.contract_address,
@@ -174,6 +176,36 @@ class EventsFetchTask(SmartTask):
             )
         return sync
 
+    def get_blocks(self):
+        # Start from the block after the last synced block or from the genesis block
+        block_last_synced = -1
+        try:
+            block_last_synced = int(self.sync.last_synced_block_number)
+        except ValueError:
+            pass
+
+        # If was empty or -1 - then take genesis block
+        block_last_synced = block_last_synced if block_last_synced >= 0 else self.contract.get_genesis_block_number()
+
+        current_block = int(self.contract.web3_http.eth.get_block('latest').get('number'))
+        block_from = block_last_synced + 1 \
+            if block_last_synced >= 0 \
+            else current_block
+
+        # Calculate block_to as either block_from plus minimum_blocks_to_fetch or current_block - 2
+        # whichever is less, ensuring block_to is never greater than current_block.
+        block_to = min(
+            block_from + (self.sync.sync_block_range or self.minimum_blocks_to_fetch),
+            current_block
+        )
+
+        # If block_to equals current_block, decrement block_from by 2 to ensure we don't miss data due
+        # to potential delays in event fetching from the Ethereum node
+        if block_to == current_block:
+            block_from -= self.block_from_back_offset
+
+        return block_from, block_to, current_block
+
     def run(self, *args, **kwargs):
         """
         This is the main execution method of the EventsFetchTask class. It is responsible for fetching events from an Ethereum
@@ -188,33 +220,26 @@ class EventsFetchTask(SmartTask):
         7. In the end, releases the lock and if there are more blocks to fetch, it triggers the same task again asynchronously.
         """
         events = []
-        block_from = block_to = block_last = None
+        block_from = block_to = current_block = None
         can_self_call = False
         try:
-            # Try to acquire the lock for this task
-            lock_result = self.lock_acquire()
-            if lock_result:
-                return lock_result.to_dict()
-
             # Get sync entry from kwargs
             self.sync = self.get_sync(**kwargs)
             if isinstance(self.sync, EventsFetchTaskResult):
                 return self.sync.to_dict()
 
+            # Try to acquire the lock for this task
+            lock_result = self.lock_acquire()
+            if lock_result:
+                return lock_result.to_dict()
+
             self.log(f'Found sync for kwargs: {kwargs}', log_method=logger.debug)
             self.get_lock().reacquire()
 
             # Prepare block range to fetch
-            block_from = int(self.sync.last_synced_block_number
-                             if self.sync.last_synced_block_number >= self.sync.last_synced_block_number
-                             else self.contract.get_genesis_block_number())
-            block_last = int(self.contract.web3_http.eth.get_block('latest').get('number'))
-            blocks_range = max(self.minimum_blocks_to_fetch, self.sync.sync_block_range)
-            block_to = min(block_last, block_from + blocks_range)
-            block_to = max(block_to, block_from)
-
+            block_from, block_to, current_block = self.get_blocks()
             self.log(
-                f'Found block range to sync events: {block_from}-{block_to}. Current block: {block_last}',
+                f'Found block range to sync events: {block_from}-{block_to}. Current block: {current_block}',
                 log_method=logger.debug
             )
             self.get_lock().reacquire()
@@ -243,6 +268,7 @@ class EventsFetchTask(SmartTask):
                     error=str(error),
                     block_from=block_from,
                     block_to=block_to,
+                    current_block=current_block,
                 ).to_dict()
 
             events: List[Dict] = fetch_events_future.result()
@@ -259,6 +285,7 @@ class EventsFetchTask(SmartTask):
                     lock=self.get_lock_name(),
                     block_from=block_from,
                     block_to=block_to,
+                    current_block=current_block,
                 ).to_dict()
 
             self.get_lock().reacquire()
@@ -287,6 +314,7 @@ class EventsFetchTask(SmartTask):
                     error=str(error),
                     block_from=block_from,
                     block_to=block_to,
+                    current_block=current_block,
                 ).to_dict()
 
             # Collect receivers results
@@ -302,6 +330,7 @@ class EventsFetchTask(SmartTask):
                     reason=f'Nobody is listening for new events',
                     block_from=block_from,
                     block_to=block_to,
+                    current_block=current_block,
                 ).to_dict()
 
             return EventsFetchTaskResult(
@@ -310,6 +339,7 @@ class EventsFetchTask(SmartTask):
                 lock=self.get_lock_name(),
                 block_from=block_from,
                 block_to=block_to,
+                current_block=current_block,
                 total_events=len(events),
                 results=[result[1].to_dict() for result in results]
             ).to_dict()
@@ -323,6 +353,7 @@ class EventsFetchTask(SmartTask):
                 lock=self.get_lock_name(),
                 block_from=block_from,
                 block_to=block_to,
+                current_block=current_block,
                 total_events=len(events),
             ).to_dict()
         finally:
@@ -333,7 +364,7 @@ class EventsFetchTask(SmartTask):
                 self.log('Can not release lock')
                 self.log(e)
             finally:
-                if block_last and block_to and block_last - block_to > self.minimum_blocks_to_fetch and can_self_call:
+                if current_block and block_to and current_block - block_to > self.minimum_blocks_to_fetch and can_self_call:
                     EventsFetchTask().apply_async(args=args, kwargs=kwargs)
 
 
