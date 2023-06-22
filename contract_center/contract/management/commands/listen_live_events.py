@@ -55,12 +55,21 @@ async def live_events_listener(sync: Sync, connect_timeout: int, recv_timeout: i
                     try:
                         message = await asyncio.wait_for(ws.recv(), timeout=recv_timeout)
                         logger.info(f'{sync.name}: Received new event: {message}')
-                        params = EventsFetchTask(
+                        params = dict(
+                            args=[
+                                sync.name,
+                                dict(
+                                    type='live'
+                                )
+                            ],
                             kwargs=dict(
-                                context='live',
                                 name=sync.name,
+                                context=dict(
+                                    type='live'
+                                )
                             )
-                        ).send()
+                        )
+                        EventsFetchTask().apply_async(**params)
                         logger.info(f'{sync.name}: Triggered live sync: {params}')
                     except websockets.ConnectionClosedError:
                         logger.error(f"{sync.name}: Connection closed. Retrying...")

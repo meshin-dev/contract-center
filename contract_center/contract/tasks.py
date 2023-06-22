@@ -56,7 +56,9 @@ class SmartTask(Task):
     lock: Lock = None
 
     # Some context specific to particular task
-    context: Dict = {}
+    context: dict = {
+        'type': 'periodic'
+    }
 
     def get_lock(self) -> Lock:
         """
@@ -224,16 +226,39 @@ class EventsFetchTask(SmartTask):
         can_self_call = False
         try:
             # Get sync entry from kwargs
-            self.sync = self.get_sync(**kwargs)
+            sync_name = kwargs.get('name', None)
+            if not sync_name:
+                return EventsFetchTaskResult(
+                    task=self.name,
+                    context=self.context,
+                    lock='',
+                    reason=f'Wrong parameters. Provide {{"name": "..."}} in task Keyword Arguments. '
+                           f'kwargs: {kwargs}',
+                ).to_dict()
+
+            # Get sync object
+            self.sync = self.get_sync(name=sync_name)
             if isinstance(self.sync, EventsFetchTaskResult):
                 return self.sync.to_dict()
 
+            # Check if sync is enabled
             if not bool(self.sync.enabled):
                 return EventsFetchTaskResult(
                     task=self.name,
                     context=self.context,
                     lock=self.get_lock_name(),
                     reason=f'Sync disabled: {self.sync.name}',
+                ).to_dict()
+
+            # Check proper context structure
+            self.context = kwargs.get('context', self.context)
+            if not isinstance(self.context, dict) or not self.context.get('type'):
+                return EventsFetchTaskResult(
+                    task=self.name,
+                    context=self.context,
+                    lock='',
+                    reason=f'Wrong parameters. Provide {{"context": {{"type": "...", ...}}}} in task Keyword Arguments. '
+                           f'kwargs: {kwargs}',
                 ).to_dict()
 
             # Try to acquire the lock for this task
