@@ -18,9 +18,9 @@ services:
       - .:/app:z
     env_file:
       - ./.envs/.local/.django
-      - ./.envs/.local/.postgres
+      - ./.env
     ports:
-      - '8000:8000'
+      - '$DJANGO_PORT:8000'
     command: /start
 
   postgres:
@@ -28,12 +28,21 @@ services:
     build:
       context: .
       dockerfile: ./compose/production/postgres/Dockerfile
-    image: contract_center_production_postgres
+    image: contract_center_local_postgres
+    hostname: contract_center_local_postgres
     volumes:
-      - contract_center_local_postgres_data:/var/lib/postgresql/data
+      - contract_center_local_postgres_data:/var/library/postgresql/data
       - contract_center_local_postgres_data_backups:/backups
     env_file:
-      - ./.envs/.local/.postgres
+      - ./.env
+    environment:
+      - "POSTGRES_DB=${POSTGRES_DB}"
+      - "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+      - "POSTGRES_USER=${POSTGRES_USER}"
+      - "POSTGRES_PORT=${POSTGRES_PORT}"
+    ports:
+      - '$POSTGRES_PORT:$POSTGRES_PORT'
+    command: -p $POSTGRES_PORT
 
   docs:
     tty: true
@@ -43,12 +52,13 @@ services:
       dockerfile: ./compose/local/docs/Dockerfile
     env_file:
       - ./.envs/.local/.django
+      - ./.env
     volumes:
       - ./docs:/docs:z
       - ./config:/app/config:z
       - ./contract_center:/app/contract_center:z
     ports:
-      - '9000:9000'
+      - '$DOCS_PORT:9000'
     command: /start-docs
 
   redis:
@@ -70,7 +80,7 @@ services:
       - redis
       - postgres
     ports: []
-    command: /start-celeryworker --worker-name=events_fetch --concurrency=2
+    command: /start-celeryworker --worker-name=events_fetch --concurrency=4
 
   worker_events_process:
     <<: *django
@@ -79,7 +89,16 @@ services:
       - redis
       - postgres
     ports: []
-    command: /start-celeryworker --worker-name=events_process --concurrency=2
+    command: /start-celeryworker --worker-name=events_process --concurrency=4
+
+  worker_events_webhooks:
+    <<: *django
+    image: contract_center_local_worker_events_webhooks
+    depends_on:
+      - redis
+      - postgres
+    ports: []
+    command: /start-celeryworker --worker-name=webhooks --concurrency=10
 
   celerybeat:
     <<: *django
@@ -94,23 +113,35 @@ services:
     <<: *django
     image: contract_center_local_flower
     ports:
-      - '5555:5555'
+      - '$FLOWER_PORT:5555'
     command: /start-flower
 
-  node:
-    tty: true
-    build:
-      context: .
-      dockerfile: ./compose/local/node/Dockerfile
-    image: contract_center_local_node
-    depends_on:
-      - django
-    volumes:
-      - .:/app:z
-      # http://jdlm.info/articles/2016/03/06/lessons-building-node-app-docker.html
-      - /app/node_modules
-    command: npm run dev
+#  node:
+#    tty: true
+#    build:
+#      context: .
+#      dockerfile: ./compose/local/node/Dockerfile
+#    image: contract_center_local_node
+#    depends_on:
+#      - django
+#    volumes:
+#      - .:/app:z
+#      # http://jdlm.info/articles/2016/03/06/lessons-building-node-app-docker.html
+#      - /app/node_modules
+#    command: npm run dev
+#    ports:
+#      - '3000:3000'
+#      # Expose browsersync UI: https://www.browsersync.io/docs/options/#option-ui
+#      - '3001:3001'
+
+  adminer:
+    image: adminer:latest
+    hostname: contract_center_local_adminer
+    container_name: contract_center_local_adminer
+    env_file:
+      - ./.env
     ports:
-      - '3000:3000'
-      # Expose browsersync UI: https://www.browsersync.io/docs/options/#option-ui
-      - '3001:3001'
+      - '$ADMINER_EXTERNAL_PORT:$ADMINER_PORT'
+    environment:
+      - "ADMINER_PLUGINS=tables-filter tinymce"
+      - "ADMINER_DESIGN=dracula"

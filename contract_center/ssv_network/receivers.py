@@ -84,22 +84,22 @@ def contract_fetched_events_receiver(
                     f'Triggering event processing task..',
                     log_method=logger.debug
                 )
-                EventsProcessTask(
+                EventsProcessTask().apply_async(
                     kwargs=dict(
                         version=version,
                         network=network
                     )
-                ).send()
+                )
                 last_time = time.time()
 
     # Trigger anyway in the end task to process events
     if at_least_one_created:
-        EventsProcessTask(
+        EventsProcessTask().apply_async(
             kwargs=dict(
                 version=version,
                 network=network
             )
-        ).send()
+        )
 
     instance.sync.last_synced_block_number = params.get('block_to')
     instance.sync.save(update_fields=['last_synced_block_number'])

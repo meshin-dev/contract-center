@@ -12,7 +12,8 @@ class SyncAdmin(ModelAdmin):
     fieldsets = (
         (_("Control"), {"fields": ("name", "enabled",)}),
         (_("Contract"), {"fields": ("contract_address", "contract_abi",)}),
-        (_("Sync"), {"fields": ("last_synced_block_number", "sync_block_range",)}),
+        (_("Sync"),
+         {"fields": ("last_synced_block_number", "sync_block_range", "contract_genesis_block", "genesis_event_name",)}),
         (_("Eth Node"), {"fields": ("node_http_address", "node_websocket_address",)}),
         (_("Connection"), {"fields": ("live_events_connect_timeout", "live_events_read_timeout",)}),
         (_("Extra"), {"fields": ("meta", "event_names",)}),

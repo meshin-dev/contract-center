@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
   libpq-dev \
   # cleaning up unused files
   && apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/library/apt/lists/*
 
 # Requirements are installed here to ensure they will be cached.
 COPY ./requirements /requirements
@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
   # latexmk \
   # cleaning up unused files
   && apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/library/apt/lists/*
 
 # copy python dependency wheels from python-build-stage
 COPY --from=python-build-stage /usr/src/app/wheels /wheels

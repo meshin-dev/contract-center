@@ -8,6 +8,7 @@ from torch.multiprocessing import Manager
 from web3 import Web3, HTTPProvider, WebsocketProvider
 from web3.contract import Contract
 
+from contract_center.contract.models.sync import GENESIS_EVENT_NAME_DEFAULT
 from contract_center.contract.web3.events import sanitize_events
 
 logger = logging.getLogger(__name__)
@@ -57,13 +58,14 @@ class Web3Contract:
             abi=abi
         )
 
-    def get_genesis_block_number(self, block_from: int = 0, source: str = 'http') -> Union[None, int]:
+    def get_genesis_block_number(self, block_from: int = 0, source: str = 'http',
+                                 genesis_event_name: str = GENESIS_EVENT_NAME_DEFAULT) -> Union[None, int]:
         """
         Tries to get the block number when the contract has been initialized.
         :return:
         """
         source = Web3Contract.websocket[self.name] if source == 'websocket' else self.http
-        past_events = source.events.Initialized.get_logs(fromBlock=block_from)
+        past_events = getattr(source.events, genesis_event_name).get_logs(fromBlock=block_from)
         first_event = past_events[0] if past_events else None
         return int(first_event['blockNumber']) if first_event else None
 

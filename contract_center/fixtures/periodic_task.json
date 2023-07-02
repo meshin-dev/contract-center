@@ -1,0 +1,30 @@
+[
+{
+    "model": "django_celery_beat.periodictask",
+    "pk": 1,
+    "fields": {
+        "name": "ssv.network: stage v4 prater events fetch",
+        "task": "contract.events_fetch",
+        "interval": 1,
+        "crontab": null,
+        "solar": null,
+        "clocked": null,
+        "args": "[]",
+        "kwargs": "{\"name\": \"ssv_network_stage_v4_prater\"}",
+        "queue": null,
+        "exchange": null,
+        "routing_key": null,
+        "headers": "{}",
+        "priority": null,
+        "expires": null,
+        "expire_seconds": null,
+        "one_off": false,
+        "start_time": null,
+        "enabled": false,
+        "last_run_at": null,
+        "total_run_count": 0,
+        "date_changed": "2023-06-27T13:35:51.504Z",
+        "description": ""
+    }
+}
+]

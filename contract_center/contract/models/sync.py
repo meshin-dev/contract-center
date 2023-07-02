@@ -8,6 +8,8 @@ from django.utils.translation import gettext_lazy as _
 
 logger = logging.getLogger(__name__)
 
+GENESIS_EVENT_NAME_DEFAULT = 'Initialized'
+
 
 class Sync(models.Model):
     """
@@ -56,6 +58,19 @@ class Sync(models.Model):
         default=0,
         blank=True,
         help_text=_("During synchronization saving here the last synced block number")
+    )
+    contract_genesis_block = models.BigIntegerField(
+        _("Contract Genesis Block Number"),
+        default=0,
+        blank=True,
+        help_text=_("Block from which the sync should always start. If empty - "
+                    f"it will automatically calculate genesis block from '{GENESIS_EVENT_NAME_DEFAULT}' event")
+    )
+    genesis_event_name = models.CharField(
+        _("Genesis Event Name"),
+        default=GENESIS_EVENT_NAME_DEFAULT,
+        blank=True,
+        help_text=_("Event name which will be used to calculate genesis block")
     )
     sync_block_range = models.IntegerField(
         _("Block Range"),

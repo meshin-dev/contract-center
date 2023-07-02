@@ -1,7 +1,5 @@
 #!/bin/bash
 
-#!/bin/bash
-
 function handle_interrupt() {
     echo "Interrupt detected. Returning to the main menu..."
     main_menu
@@ -28,7 +26,7 @@ function run_command_based_on_answer() {
 
 function main_menu() {
     echo "Main Menu:"
-    options=("Containers" "Data" "Migrations" "Users" "Quit")
+    options=("Containers" "Data" "Migrations" "Users" "Shell" "Quit")
     select opt in "${options[@]}"
     do
         case $opt in
@@ -46,6 +44,10 @@ function main_menu() {
                 ;;
             "Users")
                 users_menu
+                break
+                ;;
+            "Shell")
+                docker-compose -f local.yml run --rm django python manage.py shell
                 break
                 ;;
             "Quit")
@@ -96,22 +98,38 @@ function containers_menu() {
 
 function data_menu() {
     echo "Data:"
-    options=("Load fixtures" "Save fixtures" "Erase TestnetV4Event" "Go back")
+    options=("Load fixtures" "Save fixtures" "Erase Testnet V4 Data" "Go back")
     select opt in "${options[@]}"
     do
         case $opt in
             "Load fixtures")
-                run_command_based_on_answer "Should load all fixtures?" "echo 'TODO'"
+                function load_fixtures() {
+                    docker-compose -f local.yml run --rm django python manage.py loaddata interval_schedule.json || exit 1
+                    docker-compose -f local.yml run --rm django python manage.py loaddata clocked_schedule.json || exit 1
+                    docker-compose -f local.yml run --rm django python manage.py loaddata crontab_schedule.json || exit 1
+                    docker-compose -f local.yml run --rm django python manage.py loaddata solar_schedule.json || exit 1
+                    docker-compose -f local.yml run --rm django python manage.py loaddata periodic_task.json || exit 1
+                    docker-compose -f local.yml run --rm django python manage.py loaddata sync.json
+                }
+                run_command_based_on_answer "Should load all fixtures?" "load_fixtures"
                 data_menu
                 break
                 ;;
             "Save fixtures")
-                run_command_based_on_answer "Should dump all fixtures?" "echo 'TODO'"
+                function dump_fixtures() {
+                    docker-compose -f local.yml run --rm django python manage.py dumpdata django_celery_beat.IntervalSchedule --indent 4 -o contract_center/fixtures/interval_schedule.json || exit 1
+                    docker-compose -f local.yml run --rm django python manage.py dumpdata django_celery_beat.ClockedSchedule --indent 4 -o contract_center/fixtures/clocked_schedule.json || exit 1
+                    docker-compose -f local.yml run --rm django python manage.py dumpdata django_celery_beat.CrontabSchedule --indent 4 -o contract_center/fixtures/crontab_schedule.json || exit 1
+                    docker-compose -f local.yml run --rm django python manage.py dumpdata django_celery_beat.SolarSchedule --indent 4 -o contract_center/fixtures/solar_schedule.json || exit 1
+                    docker-compose -f local.yml run --rm django python manage.py dumpdata django_celery_beat.PeriodicTask --indent 4 -o contract_center/fixtures/periodic_task.json || exit 1
+#                    docker-compose -f local.yml run --rm django python manage.py dumpdata contract.Sync --indent 4 -o contract_center/fixtures/sync.json
+                }
+                run_command_based_on_answer "Should dump all fixtures?" "dump_fixtures"
                 data_menu
                 break
                 ;;
-            "Erase TestnetV4Event")
-                run_command_based_on_answer "Sure?" "docker-compose -f local.yml run --rm django python manage.py flush events.TestnetV4Event"
+            "Erase Testnet V4 Data")
+                run_command_based_on_answer "Sure?" "docker-compose -f local.yml run --rm django python manage.py flush contract_center.ssv_network.models.events.TestnetV4Event,contract_center.ssv_network.operators.models.operators.TestnetV4Operator"
                 data_menu
                 break
                 ;;

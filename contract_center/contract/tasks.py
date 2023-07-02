@@ -1,17 +1,12 @@
 import logging
-import time
-from concurrent.futures import ThreadPoolExecutor, Future
-from dataclasses import dataclass, field
-from typing import List, Union, Dict, Callable
+from dataclasses import dataclass
+from typing import List, Union, Dict, Tuple
 
-from celery import Task
 from dataclasses_json import dataclass_json
-from django.core.cache import caches
-from django_redis.client import DefaultClient
-from redis.lock import Lock
 
 from config.celery_app import app
-from contract_center.contract.models.sync import Sync
+from contract_center.contract.library.tasks import SmartTask, TaskResult
+from contract_center.contract.models.sync import Sync, GENESIS_EVENT_NAME_DEFAULT
 from contract_center.contract.receivers import EventReceiverResult
 from contract_center.contract.signals import contract_fetched_events_signal
 from contract_center.contract.web3.contract import Web3Contract
@@ -21,117 +16,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass_json
 @dataclass
-class EventsFetchTaskResult:
+class EventsFetchTaskResult(TaskResult):
     """
     Dataclass representing the result of the EventsFetchTask.
     """
-    task: str
-    lock: str
-    error: str = ''
-    reason: str = ''
     block_from: int = 0
     block_to: int = 0
     current_block: int = 0
     total_events: int = 0
-    context: dict = field(default_factory=dict)
-    results: list = field(default_factory=list)
-
-
-class SmartTask(Task):
-    shared = True
-
-    # How long to wait for a task to complete if it was not reacquired
-    lock_ttl_sec = 15
-
-    # How long to wait trying to acquire a lock before giving up
-    lock_blocking_timeout_sec = 1
-
-    # Period in seconds to reacquire a lock on a task if its long-lasting
-    process_reacquire_each_sec = 0.3
-
-    # Default cache client is RedisCacheClient
-    cache: DefaultClient = caches['default']
-
-    # Lock instance
-    lock: Lock = None
-
-    # Some context specific to particular task
-    context: dict = {
-        'type': 'periodic'
-    }
-
-    def get_lock(self) -> Lock:
-        """
-        Get the lock instance for the given task
-        :return:
-        """
-        self.lock = self.lock or self.cache.lock(self.get_lock_name(), timeout=self.lock_ttl_sec)
-        return self.lock
-
-    def get_lock_name(self) -> str:
-        return f'{self.name}.{self.sync.name}'
-
-    def lock_acquire(self) -> Union[None, EventsFetchTaskResult]:
-        """
-        Tries to acquire a lock for the task. If the lock cannot be acquired within a specified timeout,
-        it returns a task result with a reason for failure. If the lock is successfully acquired,
-        a debug level log message is written and None is returned.
-
-        :return: A dictionary with task result information if the lock could not be acquired; otherwise, None.
-        """
-        if self.get_lock().locked():
-            return EventsFetchTaskResult(
-                task=self.name,
-                context=self.context,
-                lock=self.get_lock_name(),
-                reason=f'Lock is already acquired'
-            )
-        if not self.get_lock().acquire(blocking_timeout=self.lock_blocking_timeout_sec):
-            return EventsFetchTaskResult(
-                task=self.name,
-                context=self.context,
-                lock=self.get_lock_name(),
-                reason=f'Could not acquire lock after {self.lock_blocking_timeout_sec} seconds'
-            )
-        self.log('Acquired the lock', log_method=logger.debug)
-        return None
-
-    def lock_reacquire_loop(self, future: Future):
-        """
-        This method is used to continuously reacquire a lock during a long-lasting synchronization operation.
-
-        The method operates in a loop, checking if the given Future is done. If it is, the loop breaks,
-        if not, it attempts to reacquire the lock and logs the operation. The loop will sleep for a specified
-        duration (self.process_reacquire_each_sec) before attempting the reacquisition again.
-
-        Parameters:
-        future (concurrent.futures.Future): Future object that represents a potentially long-lasting operation.
-                                            The loop continues until this Future is done.
-
-        Raises:
-        Exception: Any exception that is raised during the lock reacquisition is propagated.
-
-        Note: This method should be used when running a potentially long-lasting operation that requires a lock,
-        but also needs to periodically reacquire the lock to not lose it and not start the same process in parallel.
-        """
-        while True:
-            if future.done():
-                break
-            try:
-                self.get_lock().reacquire()
-                self.log(f'Reacquired lock during long lasting synchronization...', log_method=logging.debug)
-            except:
-                raise
-            time.sleep(self.process_reacquire_each_sec)
-
-    def log(self, message, log_method: Callable = logger.info):
-        if log_method == logger.exception or isinstance(message, BaseException):
-            logger.exception(message)
-        else:
-            log_method(f'[ Task {self.name} ]: '
-                       f'{message}. '
-                       f'Context: {self.context}. '
-                       f'Lock: {self.get_lock_name()}')
 
 
 class EventsFetchTask(SmartTask):
@@ -143,19 +35,23 @@ class EventsFetchTask(SmartTask):
     minimum_blocks_to_fetch = 10
     web3_contract: Web3Contract = None
 
+    def get_lock_name(self) -> str:
+        return f'{self.name}.{self.sync.name}'
+
     @property
     def contract(self) -> Web3Contract:
         """
         Get the contract instance associated with Sync
         :return:
         """
-        self.web3_contract = self.web3_contract or Web3Contract(
-            name=self.sync.name,
-            node_http_address=self.sync.node_http_address,
-            node_websocket_address=self.sync.node_websocket_address,
-            contract_address=self.sync.contract_address,
-            contract_abi=self.sync.contract_abi,
-        )
+        if not self.web3_contract:
+            self.web3_contract = Web3Contract(
+                name=self.sync.name,
+                node_http_address=self.sync.node_http_address,
+                node_websocket_address=self.sync.node_websocket_address,
+                contract_address=self.sync.contract_address,
+                contract_abi=self.sync.contract_abi,
+            )
         return self.web3_contract
 
     def get_sync(self, **kwargs) -> Union[Sync, EventsFetchTaskResult]:
@@ -178,16 +74,22 @@ class EventsFetchTask(SmartTask):
             )
         return sync
 
-    def get_blocks(self):
+    def get_blocks(self) -> Tuple[int, int, int]:
         # Start from the block after the last synced block or from the genesis block
         block_last_synced = -1
         try:
-            block_last_synced = int(self.sync.last_synced_block_number)
+            block_last_synced = max(self.sync.last_synced_block_number, self.sync.contract_genesis_block)
         except ValueError:
             pass
 
         # If was empty or -1 - then take genesis block
-        block_last_synced = block_last_synced if block_last_synced >= 0 else self.contract.get_genesis_block_number()
+        if block_last_synced <= 0:
+            block_last_synced = self.contract.get_genesis_block_number(
+                genesis_event_name=self.sync.genesis_event_name or GENESIS_EVENT_NAME_DEFAULT
+            )
+            if not self.sync.contract_genesis_block:
+                self.sync.contract_genesis_block = block_last_synced
+                self.sync.save(update_fields=['contract_genesis_block'])
 
         current_block = int(self.contract.web3_http.eth.get_block('latest').get('number'))
         block_from = block_last_synced + 1 \
@@ -241,6 +143,8 @@ class EventsFetchTask(SmartTask):
             if isinstance(self.sync, EventsFetchTaskResult):
                 return self.sync.to_dict()
 
+            self.log(f'Found sync for kwargs: {kwargs}', log_method=logger.debug)
+
             # Check if sync is enabled
             if not bool(self.sync.enabled):
                 return EventsFetchTaskResult(
@@ -257,60 +161,64 @@ class EventsFetchTask(SmartTask):
                     task=self.name,
                     context=self.context,
                     lock='',
-                    reason=f'Wrong parameters. Provide {{"context": {{"type": "...", ...}}}} in task Keyword Arguments. '
+                    reason=f'Wrong parameters. '
+                           f'Provide {{"context": {{"type": "...", ...}}}} in task Keyword Arguments. '
                            f'kwargs: {kwargs}',
                 ).to_dict()
 
             # Try to acquire the lock for this task
-            lock_result = self.lock_acquire()
-            if lock_result:
-                return lock_result.to_dict()
+            try:
+                self.get_lock_manager().lock_acquire()
+            except Exception as e:
+                return EventsFetchTaskResult(
+                    task=self.name,
+                    context=self.context,
+                    lock=self.get_lock_name(),
+                    reason=str(e),
+                ).to_dict()
 
-            self.log(f'Found sync for kwargs: {kwargs}', log_method=logger.debug)
-            self.get_lock().reacquire()
+            # Wait for blocks range calculation
+            self.get_lock_manager().submit(lambda: self.get_blocks())
+            self.get_lock_manager().keep_alive(raise_exceptions=True)
 
-            # Prepare block range to fetch
-            block_from, block_to, current_block = self.get_blocks()
+            # Get blocks data
+            block_from, block_to, current_block = self.get_lock_manager().result(clean=True).result()
             self.log(
                 f'Found block range to sync events: {block_from}-{block_to}. Current block: {current_block}',
                 log_method=logger.debug
             )
-            self.get_lock().reacquire()
 
             # Fetch events
+            events: List[Dict] = []
             fetch_params = dict(
                 events=self.sync.event_names,
                 block_from=block_from,
                 block_to=block_to,
             )
-            executor = ThreadPoolExecutor()
-            fetch_events_future = executor.submit(lambda: self.contract.events_fetch(**fetch_params))
-
-            # Reacquire the lock in parallel with fetching events
-            self.lock_reacquire_loop(future=fetch_events_future)
-
-            # Check for errors
-            error = fetch_events_future.exception()
-            if error:
-                self.log(error)
+            try:
+                self.get_lock_manager().submit(lambda: self.contract.events_fetch(**fetch_params))
+                self.get_lock_manager().keep_alive(raise_exceptions=True)
+                events: List[Dict] = self.get_lock_manager().result(clean=True).result()
+                self.log(f'Fetched {len(events)} new events', log_method=logger.debug)
+            except Exception as e:
+                self.log(e)
                 return EventsFetchTaskResult(
                     task=self.name,
                     context=self.context,
                     lock=self.get_lock_name(),
                     reason=f'Could not fetch new events',
-                    error=str(error),
+                    error=str(e),
                     block_from=block_from,
                     block_to=block_to,
                     current_block=current_block,
                 ).to_dict()
 
-            events: List[Dict] = fetch_events_future.result()
-            self.log(f'Fetched {len(events)} new events', log_method=logger.debug)
-            self.get_lock().reacquire()
-
+            # If no events are fetched, update last_synced_block_number and return
             if not len(events):
                 self.sync.last_synced_block_number = block_to - self.block_from_back_offset
-                self.sync.save(update_fields=['last_synced_block_number'])
+                self.get_lock_manager().submit(lambda: self.sync.save(update_fields=['last_synced_block_number']))
+                self.get_lock_manager().keep_alive(raise_exceptions=True)
+
                 can_self_call = True
                 return EventsFetchTaskResult(
                     task=self.name,
@@ -321,40 +229,30 @@ class EventsFetchTask(SmartTask):
                     current_block=current_block,
                 ).to_dict()
 
-            self.get_lock().reacquire()
-
             # Trigger signal to sync new events
-            executor = ThreadPoolExecutor()
-            new_events_signal_future = executor.submit(lambda: contract_fetched_events_signal.send(
-                sender=self.__name__,
-                instance=self,
-                params=fetch_params,
-                events=events,
-            ))
-
-            # Reacquire the lock in parallel with signal handlers work
-            self.lock_reacquire_loop(future=new_events_signal_future)
-
-            # Check out error from signal receivers and return error in case of failure
-            error = new_events_signal_future.exception()
-            if error:
-                # Return error from task
+            try:
+                self.get_lock_manager().submit(lambda: contract_fetched_events_signal.send(
+                    sender=self.__name__,
+                    instance=self,
+                    params=fetch_params,
+                    events=events,
+                ))
+                self.get_lock_manager().keep_alive(raise_exceptions=True)
+                results: List[EventReceiverResult] = self.get_lock_manager().result(clean=True).result()
+                can_self_call = True
+            except Exception as e:
                 return EventsFetchTaskResult(
                     task=self.name,
                     context=self.context,
                     lock=self.get_lock_name(),
                     reason=f'Could not send new events signal to receivers',
-                    error=str(error),
+                    error=str(e),
                     block_from=block_from,
                     block_to=block_to,
                     current_block=current_block,
                 ).to_dict()
 
-            # Collect receivers results
-            results: List[EventReceiverResult] = new_events_signal_future.result()
-
-            can_self_call = True
-
+            # If no receivers are listening for new events, return without saving last synced block number
             if not len(results):
                 return EventsFetchTaskResult(
                     task=self.name,
@@ -390,15 +288,20 @@ class EventsFetchTask(SmartTask):
                 total_events=len(events),
             ).to_dict()
         finally:
-            try:
-                if self.get_lock().locked() and hasattr(self.get_lock().local, 'token') and self.get_lock().owned():
-                    self.get_lock().release()
-            except Exception as e:
-                self.log('Can not release lock')
-                self.log(e)
-            finally:
-                if current_block and block_to and current_block - block_to > self.minimum_blocks_to_fetch and can_self_call:
-                    EventsFetchTask().apply_async(args=args, kwargs=kwargs)
+            # Check if we need to call self again
+            self.get_lock_manager().close()
+            if current_block and block_to and current_block - block_to > self.minimum_blocks_to_fetch and can_self_call:
+                kwargs = {
+                    **kwargs,
+                    "context": {
+                        **self.context,
+                        'type': 'periodic'
+                    }
+                }
+                EventsFetchTask().apply_async(
+                    args=args,
+                    kwargs=kwargs,
+                )
 
 
 app.register_task(EventsFetchTask)
