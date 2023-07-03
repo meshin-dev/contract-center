@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Union, List, Dict
 
@@ -39,6 +40,7 @@ class Web3Contract:
         :param contract_abi:
         """
         self.name = name
+        self.executor = None
         abi = json.loads(contract_abi) if isinstance(contract_abi, str) else contract_abi
 
         if not abi:
@@ -128,28 +130,39 @@ class Web3Contract:
         # Thread-safe list
         manager = Manager()
         all_events = manager.list()
-        max_workers = min(default_max_workers, len(list(events)))
+        max_workers = min(default_max_workers, math.ceil(len(events) / 3))
 
-        # Multi-thread events fetch
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            events_result_future = {
-                executor.submit(
-                    self.event_fetch,
-                    **dict(
-                        event=event,
-                        block_from=block_from,
-                        block_to=block_to,
-                        max_retries=max_retries,
-                        retry_delay=retry_delay,
-                        source=source,
-                    )
-                ) for event in events
-            }
-            try:
-                for future in as_completed(events_result_future):
-                    all_events.extend(future.result())
-            except:
-                # Graceful shutdown thread pool
-                executor.shutdown()
-                raise
+        if not self.executor:
+            self.executor = ThreadPoolExecutor(max_workers=max_workers)
+
+        # Multi-thread events fetching
+        events_result_future = {
+            self.executor.submit(
+                self.event_fetch,
+                **dict(
+                    event=event,
+                    block_from=block_from,
+                    block_to=block_to,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay,
+                    source=source,
+                )
+            ) for event in events
+        }
+        for future in as_completed(events_result_future):
+            all_events.extend(future.result())
+
         return sanitize_events(list(all_events))
+
+    def shutdown(self):
+        if self.executor:
+            self.executor.shutdown()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.shutdown()
+
+    def __del__(self):
+        self.shutdown()

@@ -3,8 +3,8 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable, List, Union, Dict
 
-from redis.lock import Lock
 from redis import Redis
+from redis.lock import Lock
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -18,10 +18,10 @@ class LockManager:
     def __init__(
         self,
         lock: Union[Lock, str] = None,
-        lock_timeout: int = 5,
-        keep_alive_timeout: int = 1,
-        lock_extend_from_sec: int = 1,
-        lock_blocking_timeout: int = 5,
+        lock_timeout_sec: float = 5,
+        keep_alive_timeout: float = 0.1,
+        lock_extend_from_sec: float = 2,
+        lock_blocking_timeout_sec: float = 5,
         redis_client: Redis = None,
     ):
         self.name = None
@@ -30,10 +30,10 @@ class LockManager:
         self.redis_client = redis_client
 
         # Lock options
-        self.lock_timeout = lock_timeout
+        self.lock_timeout = lock_timeout_sec
         self.keep_alive_timeout = keep_alive_timeout
         self.lock_extend_from_sec = lock_extend_from_sec
-        self.lock_blocking_timeout = lock_blocking_timeout
+        self.lock_blocking_timeout = lock_blocking_timeout_sec
 
         # Futures
         self.future_options = {}
@@ -107,10 +107,10 @@ class LockManager:
         """
         lock: Lock = self.get_lock()
         return lock \
-            and lock.locked() \
-            and hasattr(lock, 'local') \
-            and hasattr(lock.local, 'token') \
-            and lock.owned()
+               and lock.locked() \
+               and hasattr(lock, 'local') \
+               and hasattr(lock.local, 'token') \
+               and lock.owned()
 
     def lock_acquire(self):
         """
@@ -144,19 +144,15 @@ class LockManager:
         while any(not future.done() for future in self.future_options):
             # Check if any of the futures is done and have exception which should be raised forward
             for future in self.future_options:
-                logger.debug(f"Waiting for: {future}")
                 if future.done():
                     if self.future_options[future]['race_if_first']:
-                        logger.debug(f'Stopping keep alive because of race condition')
                         return
                     if raise_exceptions and future.exception():
                         raise future.exception()
 
             # Check if it should extend the lock
             time_passed = float(time.time() - start)
-            logger.debug(f'Time passed: {time_passed}')
             if time_passed > self.lock_extend_from_sec and self.lock_owned():
-                logger.debug(f'Extending lock to {time_passed} seconds')
                 start = time.time()
                 self.get_lock().extend(time_passed)
             time.sleep(self.keep_alive_timeout)

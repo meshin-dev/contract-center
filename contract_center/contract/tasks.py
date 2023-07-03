@@ -5,7 +5,7 @@ from typing import List, Union, Dict, Tuple
 from dataclasses_json import dataclass_json
 
 from config.celery_app import app
-from contract_center.contract.library.tasks import SmartTask, TaskResult
+from contract_center.library.tasks import SmartTask, TaskResult
 from contract_center.contract.models.sync import Sync, GENESIS_EVENT_NAME_DEFAULT
 from contract_center.contract.receivers import EventReceiverResult
 from contract_center.contract.signals import contract_fetched_events_signal

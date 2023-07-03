@@ -6,7 +6,7 @@ from celery import Task
 from dataclasses_json import dataclass_json
 from django.core.cache import caches
 
-from contract_center.contract.library.locks import LockManager
+from contract_center.library.locks import LockManager
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +28,13 @@ class SmartTask(Task):
     shared = True
 
     # How long to wait for a task to complete if it was not reacquired
-    lock_ttl_sec = 15
+    lock_timeout_sec = 5
 
     # How long to wait trying to acquire a lock before giving up
     lock_blocking_timeout_sec = 1
 
     # Period in seconds to reacquire a lock on a task if its long-lasting
-    lock_extend_from_sec = 1
+    lock_extend_from_sec = 2
 
     # Lock manager instance
     lock_manager: LockManager = None
@@ -50,13 +50,12 @@ class SmartTask(Task):
         :return:
         """
         if not self.lock_manager:
-            params = dict(
+            self.lock_manager = LockManager(
                 lock=self.get_lock_name(),
-                lock_timeout=self.lock_ttl_sec,
-                lock_blocking_timeout=self.lock_blocking_timeout_sec,
+                lock_timeout_sec=self.lock_timeout_sec,
                 lock_extend_from_sec=self.lock_extend_from_sec,
+                lock_blocking_timeout_sec=self.lock_blocking_timeout_sec,
             )
-            self.lock_manager = LockManager(**params)
             self.lock_manager.set_redis_client(caches['default'])
         return self.lock_manager
 
