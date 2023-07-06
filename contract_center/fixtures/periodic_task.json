@@ -22,8 +22,36 @@
         "start_time": null,
         "enabled": false,
         "last_run_at": null,
+        "total_run_count": 228,
+        "date_changed": "2023-07-06T15:28:55.813Z",
+        "description": ""
+    }
+},
+{
+    "model": "django_celery_beat.periodictask",
+    "pk": 2,
+    "fields": {
+        "name": "celery.backend_cleanup",
+        "task": "celery.backend_cleanup",
+        "interval": null,
+        "crontab": 1,
+        "solar": null,
+        "clocked": null,
+        "args": "[]",
+        "kwargs": "{}",
+        "queue": null,
+        "exchange": null,
+        "routing_key": null,
+        "headers": "{}",
+        "priority": null,
+        "expires": null,
+        "expire_seconds": 43200,
+        "one_off": false,
+        "start_time": null,
+        "enabled": true,
+        "last_run_at": null,
         "total_run_count": 0,
-        "date_changed": "2023-06-27T13:35:51.504Z",
+        "date_changed": "2023-07-06T15:28:05.538Z",
         "description": ""
     }
 }

@@ -1,7 +1,7 @@
 import logging
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Callable, List, Union, Dict
+from typing import Callable, List, Union, Dict, Any
 
 from redis import Redis
 from redis.lock import Lock
@@ -17,12 +17,12 @@ class LockManager:
 
     def __init__(
         self,
+        redis_client: Redis = None,
         lock: Union[Lock, str] = None,
         lock_timeout_sec: float = 5,
-        keep_alive_timeout: float = 0.1,
         lock_extend_from_sec: float = 2,
         lock_blocking_timeout_sec: float = 5,
-        redis_client: Redis = None,
+        wait_for_futures_timeout_sec: float = 0.1,
     ):
         self.name = None
 
@@ -31,9 +31,9 @@ class LockManager:
 
         # Lock options
         self.lock_timeout = lock_timeout_sec
-        self.keep_alive_timeout = keep_alive_timeout
         self.lock_extend_from_sec = lock_extend_from_sec
-        self.lock_blocking_timeout = lock_blocking_timeout_sec
+        self.lock_blocking_timeout_sec = lock_blocking_timeout_sec
+        self.wait_for_futures_timeout_sec = wait_for_futures_timeout_sec
 
         # Futures
         self.future_options = {}
@@ -123,14 +123,14 @@ class LockManager:
         if self.get_lock().locked() and not self.lock_owned():
             raise EnvironmentError(f'Lock is already acquired for {self.name} from other process')
 
-        if not self.get_lock().acquire(blocking=True, blocking_timeout=self.lock_blocking_timeout):
-            raise EnvironmentError(f'Failed to acquire lock for {self.name} after {self.lock_blocking_timeout} seconds')
+        if not self.get_lock().acquire(blocking=True, blocking_timeout=self.lock_blocking_timeout_sec):
+            raise EnvironmentError(f'Failed to acquire lock for {self.name} after {self.lock_blocking_timeout_sec} seconds')
         logger.debug(f'Acquired the lock for {self.name}')
 
-    def keep_alive(self, raise_exceptions: bool = False):
+    def wait_for_futures(self, raise_exceptions: bool = True):
         """
         The main method that keeps the lock alive until all futures are done or an exception is raised.
-        It sleeps for a predefined time (self.keep_alive_timeout) between checks for the futures' states.
+        It sleeps for a predefined time (self.wait_for_futures_timeout_sec) between checks for the futures' states.
         If the time passed since the start of the loop is more than self.lock_extend_from_sec, it extends the lock.
 
         :param raise_exceptions: A flag that indicates whether to raise exceptions that occurred in the futures.
@@ -155,16 +155,26 @@ class LockManager:
             if time_passed > self.lock_extend_from_sec and self.lock_owned():
                 start = time.time()
                 self.get_lock().extend(time_passed)
-            time.sleep(self.keep_alive_timeout)
+            time.sleep(self.wait_for_futures_timeout_sec)
 
-    def results(self, clean: bool = True) -> List[Future]:
+    def results(self, clean: bool = True, raise_exceptions: bool = True) -> List[Any]:
+        self.wait_for_futures(raise_exceptions=raise_exceptions)
+        return [future.result() for future in self.future_results(clean=clean)]
+
+    def future_results(self, clean: bool = True, raise_exceptions: bool = True) -> List[Future]:
+        self.wait_for_futures(raise_exceptions=raise_exceptions)
         results = [future for future in self.future_options]
         if clean:
             self.shutdown_executors()
             self.future_options = {}
         return results
 
-    def result(self, clean: bool = True) -> Future:
+    def result(self, clean: bool = True, raise_exceptions: bool = True) -> Any:
+        self.wait_for_futures(raise_exceptions=raise_exceptions)
+        return self.future_result(clean=clean).result()
+
+    def future_result(self, clean: bool = True, raise_exceptions: bool = True) -> Future:
+        self.wait_for_futures(raise_exceptions=raise_exceptions)
         result = list(self.future_options.keys())[-1]
         if clean:
             self.shutdown_executors()

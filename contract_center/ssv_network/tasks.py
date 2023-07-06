@@ -77,11 +77,11 @@ class EventsProcessTask(SmartTask):
             ).to_dict()
         return None
 
-    @staticmethod
-    def fetch_events_callable(
+    def get_events_for_processing_callable(
+        self,
         event_model: Type[EventModel],
         process_status: ProcessStatus = None,
-        limit: int = 1  # TODO: make it configurable through Sync model
+        limit: int = 10  # TODO: make it configurable through Sync model
     ) -> List[EventModel]:
         """
         Get events to process
@@ -91,10 +91,14 @@ class EventsProcessTask(SmartTask):
         :return:
         """
         condition = dict(
-            process_status__isnull=True,
-        ) if process_status is None else dict(
-            process_status=process_status.value,
+            version=self.version,
+            network=self.network,
+            data_version=self.sync.sync_data_version,
         )
+        if process_status is None:
+            condition['process_status__isnull'] = True
+        else:
+            condition['process_status'] = process_status.value
         return event_model.objects.filter(Q(**condition)).order_by('blockNumber', 'transactionIndex')[:limit]
 
     def run(self, *args, **kwargs):
@@ -123,8 +127,6 @@ class EventsProcessTask(SmartTask):
                     reason=str(e),
                 ).to_dict()
 
-            print(f'Acquired lock. PID: {os.getpid()} Thread: {threading.get_native_id()}')
-
             # Get sync info
             try:
                 self.get_lock_manager().submit(lambda: Sync.load(
@@ -132,10 +134,8 @@ class EventsProcessTask(SmartTask):
                     meta__network=self.network,
                     enabled=True,
                 ))
-                self.get_lock_manager().keep_alive(raise_exceptions=True)
-
-                sync: Sync = self.get_lock_manager().result(clean=True).result()
-                if not sync:
+                self.sync = self.get_lock_manager().result()
+                if not self.sync:
                     return EventsProcessTaskResult(
                         version=self.version,
                         network=self.network,
@@ -143,8 +143,8 @@ class EventsProcessTask(SmartTask):
                         reason='Sync is not enabled or not created'
                     ).to_dict()
             except Exception as e:
-                self.log('Could not get sync info', log_method=logger.error)
-                self.log(e)
+                logger.error('Could not get sync info')
+                logger.exception(e)
                 return EventsProcessTaskResult(
                     version=self.version,
                     network=self.network,
@@ -154,7 +154,7 @@ class EventsProcessTask(SmartTask):
                 ).to_dict()
 
             # Get proper model to get events
-            event_model: Type[EventModel] = get_event_model(self.version, self.network)
+            event_model: Type[EventModel] = get_event_model(self.network)
             if not event_model:
                 return EventsProcessTaskResult(
                     version=self.version,
@@ -165,13 +165,12 @@ class EventsProcessTask(SmartTask):
 
             # Get events to process in a thread
             try:
-                self.get_lock_manager().submit(lambda: self.fetch_events_callable(event_model))
-                self.get_lock_manager().keep_alive(raise_exceptions=True)
-                events: List[EventModel] = self.get_lock_manager().result(clean=True).result()
-                self.log(f'Fetched {len(events)} events to process')
+                self.get_lock_manager().submit(lambda: self.get_events_for_processing_callable(event_model))
+                events: List[EventModel] = self.get_lock_manager().result()
+                logger.info(f'Fetched {len(events)} events to process')
             except Exception as e:
-                self.log('Could not fetch events to process', log_method=logger.error)
-                self.log(e)
+                logger.error('Could not fetch events to process')
+                logger.exception(e)
                 return EventsProcessTaskResult(
                     version=self.version,
                     network=self.network,
@@ -191,16 +190,10 @@ class EventsProcessTask(SmartTask):
                         network=self.network,
                         event=event
                     ))
-                    self.get_lock_manager().keep_alive(raise_exceptions=True)
-
                     # Collect receivers' results
-                    results: List[EventReceiverResult] = [
-                        result.result() for result in self.get_lock_manager().result(clean=True).result()
-                    ]
+                    results: List[EventReceiverResult] = self.get_lock_manager().result()
                     if not len(results):
-                        self.log('No results from receivers. Looks like no subscribers to process events',
-                                 log_method=logger.warning)
-
+                        logger.warning('No results from receivers: subscribers to process events')
                         return EventsProcessTaskResult(
                             version=self.version,
                             network=self.network,
@@ -212,9 +205,9 @@ class EventsProcessTask(SmartTask):
                     event.process_status = ProcessStatus.PROCESSED.value
                     event.save(update_fields=['process_status'])
 
-                    self.log(f'Processed event: "{event.event}". '
-                             f'Block: {event.blockNumber}. '
-                             f'Transaction Hash: {event.transactionHash}')
+                    logger.debug(f'Processed event: "{event.event}". '
+                                 f'Block: {event.blockNumber}. '
+                                 f'Transaction Hash: {event.transactionHash}')
 
             # Return success
             can_self_schedule = len(events)
@@ -225,8 +218,8 @@ class EventsProcessTask(SmartTask):
             ).to_dict()
 
         except Exception as e:
-            self.log('Can not process events')
-            self.log(e)
+            logger.error('Can not process events')
+            logger.exception(e)
             return EventsProcessTaskResult(
                 version=self.version,
                 network=self.network,
@@ -248,10 +241,13 @@ class EventsProcessTask(SmartTask):
         Get count of events to process
         :return:
         """
-        event_model: Type[EventModel] = get_event_model(self.version, self.network)
+        event_model: Type[EventModel] = get_event_model(self.network)
         if not event_model:
             return 0
         return event_model.objects.filter(
+            version=self.version,
+            network=self.network,
+            data_version=self.sync.sync_data_version,
             process_status=ProcessStatus.NEW.value
         ).count()
 

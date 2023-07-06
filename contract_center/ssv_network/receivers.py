@@ -45,19 +45,26 @@ def contract_fetched_events_receiver(
     network = str(instance.sync.meta.get('network'))
     assert network, 'Network in Sync.meta is required'
 
-    event_model: Type[EventModel] = get_event_model(version, network)
+    event_model: Type[EventModel] = get_event_model(network)
     assert event_model, f'EventModel for version {version} and network {network} is not found'
 
-    instance.log(f'Found model for version {version} and network {network}: {event_model}', log_method=logger.debug)
+    logger.debug(f'Found model for version {version} and network {network}: {event_model}. '
+                 f'Task: {instance.name}. '
+                 f'Context: {instance.context}. '
+                 f'Lock: {instance.get_lock_name()}')
 
     at_least_one_created = False
     last_time = time.time() - 1
     for event in events:
         _, created = event_model.objects.get_or_create(
             transactionHash=event['transactionHash'],
+            version=version,
+            network=network,
+            data_version=instance.sync.sync_data_version,
             defaults=dict(
                 version=version,
                 network=network,
+                data_version=instance.sync.sync_data_version,
                 **event,
             )
         )
@@ -73,17 +80,17 @@ def contract_fetched_events_receiver(
             instance.sync.save(update_fields=['last_synced_block_number'])
 
             result.saved_total += 1
-            instance.log(
-                f'Saved new raw event: {event}',
-                log_method=logger.debug
-            )
+            logger.debug(f'Saved raw event for version {version} and network {network}: {event}. '
+                         f'Task: {instance.name}. '
+                         f'Context: {instance.context}. '
+                         f'Lock: {instance.get_lock_name()}')
 
             # Trigger periodic task to process events at least once every second
             if time.time() - last_time >= 1:
-                instance.log(
-                    f'Triggering event processing task..',
-                    log_method=logger.debug
-                )
+                logger.debug(f'Triggering event processing task.. '
+                             f'Task: {instance.name}. '
+                             f'Context: {instance.context}. '
+                             f'Lock: {instance.get_lock_name()}')
                 EventsProcessTask().apply_async(
                     kwargs=dict(
                         version=version,

@@ -35,6 +35,10 @@ class EventsFetchTask(SmartTask):
     minimum_blocks_to_fetch = 10
     web3_contract: Web3Contract = None
 
+    def __init__(self):
+        self.last_chunk_size = None
+        self.last_events_count = 0
+
     def get_lock_name(self) -> str:
         return f'{self.name}.{self.sync.name}'
 
@@ -98,10 +102,17 @@ class EventsFetchTask(SmartTask):
 
         # Calculate block_to as either block_from plus minimum_blocks_to_fetch or current_block - 2
         # whichever is less, ensuring block_to is never greater than current_block.
+        self.last_chunk_size = self.last_chunk_size or (self.sync.sync_block_range or self.minimum_blocks_to_fetch)
         block_to = min(
-            block_from + (self.sync.sync_block_range or self.minimum_blocks_to_fetch),
+            block_from + self.contract.estimate_next_chunk_size(
+                current_chunk_size=self.last_chunk_size,
+                event_found_count=self.last_events_count,
+                min_scan_chunk_size=self.minimum_blocks_to_fetch,
+                max_scan_chunk_size=self.sync.sync_block_range,
+            ),
             current_block
         )
+        self.last_chunk_size = block_to - block_from
 
         # If block_to equals current_block, decrement block_from by 2 to ensure we don't miss data due
         # to potential delays in event fetching from the Ethereum node
@@ -143,7 +154,7 @@ class EventsFetchTask(SmartTask):
             if isinstance(self.sync, EventsFetchTaskResult):
                 return self.sync.to_dict()
 
-            self.log(f'Found sync for kwargs: {kwargs}', log_method=logger.debug)
+            logger.debug(f'Found sync for kwargs: {kwargs}')
 
             # Check if sync is enabled
             if not bool(self.sync.enabled):
@@ -177,31 +188,28 @@ class EventsFetchTask(SmartTask):
                     reason=str(e),
                 ).to_dict()
 
-            # Wait for blocks range calculation
-            self.get_lock_manager().submit(lambda: self.get_blocks())
-            self.get_lock_manager().keep_alive(raise_exceptions=True)
-
             # Get blocks data
-            block_from, block_to, current_block = self.get_lock_manager().result(clean=True).result()
-            self.log(
-                f'Found block range to sync events: {block_from}-{block_to}. Current block: {current_block}',
-                log_method=logger.debug
-            )
+            self.get_lock_manager().submit(lambda: self.get_blocks())
+            block_from, block_to, current_block = self.get_lock_manager().result()
+            logger.debug(f'Found block range to sync events: {block_from}-{block_to}. '
+                         f'Current block: {current_block}')
 
             # Fetch events
             events: List[Dict] = []
             fetch_params = dict(
-                events=self.sync.event_names,
                 block_from=block_from,
                 block_to=block_to,
+                events=self.sync.event_names,
             )
             try:
-                self.get_lock_manager().submit(lambda: self.contract.events_fetch(**fetch_params))
-                self.get_lock_manager().keep_alive(raise_exceptions=True)
-                events: List[Dict] = self.get_lock_manager().result(clean=True).result()
-                self.log(f'Fetched {len(events)} new events', log_method=logger.debug)
+                logger.debug(f'Fetching new events...')
+                self.get_lock_manager().submit(lambda: self.contract.get_logs(**fetch_params))
+                events: List[Dict] = self.get_lock_manager().result()
+                self.last_events_count = len(events)
+                logger.debug(f'Fetched {len(events)} new events')
             except Exception as e:
-                self.log(e)
+                logger.error('Could not fetch new events')
+                logger.exception(e)
                 return EventsFetchTaskResult(
                     task=self.name,
                     context=self.context,
@@ -217,9 +225,9 @@ class EventsFetchTask(SmartTask):
             if not len(events):
                 self.sync.last_synced_block_number = block_to - self.block_from_back_offset
                 self.get_lock_manager().submit(lambda: self.sync.save(update_fields=['last_synced_block_number']))
-                self.get_lock_manager().keep_alive(raise_exceptions=True)
+                self.get_lock_manager().wait_for_futures()
 
-                can_self_call = True
+                can_self_call = block_to < current_block
                 return EventsFetchTaskResult(
                     task=self.name,
                     context=self.context,
@@ -237,8 +245,7 @@ class EventsFetchTask(SmartTask):
                     params=fetch_params,
                     events=events,
                 ))
-                self.get_lock_manager().keep_alive(raise_exceptions=True)
-                results: List[EventReceiverResult] = self.get_lock_manager().result(clean=True).result()
+                results: List[EventReceiverResult] = self.get_lock_manager().result()
                 can_self_call = True
             except Exception as e:
                 return EventsFetchTaskResult(
@@ -276,8 +283,8 @@ class EventsFetchTask(SmartTask):
             ).to_dict()
 
         except Exception as e:
-            self.log('Can not fetch events')
-            self.log(e)
+            logger.error('Can not fetch events')
+            logger.exception(e)
             return EventsFetchTaskResult(
                 task=self.name,
                 context=self.context,
@@ -290,7 +297,13 @@ class EventsFetchTask(SmartTask):
         finally:
             # Check if we need to call self again
             self.get_lock_manager().close()
+            if current_block and current_block == block_to:
+                self.sync.active_data_version = self.sync.sync_data_version
+                self.sync.save(update_fields=['active_data_version'])
+                logger.debug(f'Updated active data version to {self.sync.active_data_version}')
+
             if current_block and block_to and current_block - block_to > self.minimum_blocks_to_fetch and can_self_call:
+                logger.debug(f'Calling self again because not reached latest block...')
                 kwargs = {
                     **kwargs,
                     "context": {

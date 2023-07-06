@@ -1,6 +1,6 @@
-from .operators import TestnetV4Operator, MainnetV4Operator
+from .operators import TestnetOperator, MainnetOperator
 
 __all__ = [
-    TestnetV4Operator,
-    MainnetV4Operator,
+    TestnetOperator,
+    MainnetOperator,
 ]

@@ -98,7 +98,7 @@ function containers_menu() {
 
 function data_menu() {
     echo "Data:"
-    options=("Load fixtures" "Save fixtures" "Erase Testnet V4 Data" "Go back")
+    options=("Load fixtures" "Save fixtures" "Erase Testnet Data" "Go back")
     select opt in "${options[@]}"
     do
         case $opt in
@@ -128,8 +128,8 @@ function data_menu() {
                 data_menu
                 break
                 ;;
-            "Erase Testnet V4 Data")
-                run_command_based_on_answer "Sure?" "docker-compose -f local.yml run --rm django python manage.py flush contract_center.ssv_network.models.events.TestnetV4Event,contract_center.ssv_network.operators.models.operators.TestnetV4Operator"
+            "Erase Testnet Data")
+                run_command_based_on_answer "Sure?" "docker-compose -f local.yml run --rm django python manage.py flush contract_center.ssv_network.models.events.TestnetEvent,contract_center.ssv_network.operators.models.operators.TestnetOperator"
                 data_menu
                 break
                 ;;

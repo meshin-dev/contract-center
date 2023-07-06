@@ -4,6 +4,7 @@ from typing import Union
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 logger = logging.getLogger(__name__)
@@ -12,25 +13,6 @@ GENESIS_EVENT_NAME_DEFAULT = 'Initialized'
 
 
 class Sync(models.Model):
-    """
-        [
-  "OperatorAdded",
-  "OperatorRemoved",
-  "OperatorFeeExecuted",
-  "OperatorFeeDeclared",
-  "ClusterLiquidated",
-  "ClusterReactivated",
-  "ValidatorAdded",
-  "ValidatorRemoved",
-  "ClusterDeposited",
-  "ClusterWithdrawn",
-  "FeeRecipientAddressUpdated"
-]
-    0x45B831727DC96035e6a2f77AAAcE4835195a54Af
-    https://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA
-    wss://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA
-
-    """
     name = models.SlugField(
         _('Name'),
         max_length=255,
@@ -42,6 +24,28 @@ class Sync(models.Model):
         default=False,
         blank=True,
         help_text=_('Dynamically enable or disable this sync')
+    )
+
+    # Data versioning so that it would be easy to switch between versions or sync next data while using current one
+    sync_data_version = models.BigIntegerField(
+        blank=True,
+        null=True,
+        help_text=_('Version of the data that is currently being synced. Dont change it manually')
+    )
+    active_data_version = models.BigIntegerField(
+        blank=True,
+        null=True,
+        help_text=_('Version of the data that is currently active. Dont change it manually')
+    )
+
+    # This field is not going to be used in the model, only in the admin interface.
+    create_new_version = models.BooleanField(
+        default=False,
+        help_text=_('Create new version of the data. If sync is active, sync will be working with new version')
+    )
+    clear_versions = models.BooleanField(
+        default=False,
+        help_text=_('Clear all versions of the data. If sync is active, it will be stopped')
     )
     contract_address = models.CharField(
         _("Contract Address"),
@@ -136,3 +140,33 @@ class Sync(models.Model):
 
     def get_absolute_url(self) -> str:
         return reverse("sync:detail", kwargs={"pk": self.pk})
+
+    def save(self, *args, **kwargs) -> None:
+        if self.clear_versions:
+            self.last_synced_block_number = 0
+            self.sync_data_version = None
+            self.active_data_version = None
+            self.clear_versions = False
+            self.enabled = False
+
+        # Set sync_data_version and active_data_version to timezone.now if they are empty.
+        elif self.sync_data_version is None and self.active_data_version is None:
+            self.sync_data_version = int(timezone.now().timestamp())
+            self.active_data_version = self.sync_data_version
+            self.last_synced_block_number = 0
+
+        # Update the data_version to timezone.now if the create_new_version checkbox is checked.
+        elif self.create_new_version:
+            self.sync_data_version = int(timezone.now().timestamp())
+            self.last_synced_block_number = 0
+
+        self.create_new_version = False
+        super().save(*args, **kwargs)
+
+    def switch_latest_data_version(self) -> None:
+        if self.sync_data_version and not self.is_latest_data_version():
+            self.active_data_version = self.sync_data_version
+            self.save()
+
+    def is_latest_data_version(self) -> bool:
+        return self.sync_data_version == self.active_data_version

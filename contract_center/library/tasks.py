@@ -1,6 +1,5 @@
 import logging
 from dataclasses import dataclass, field
-from typing import Callable
 
 from celery import Task
 from dataclasses_json import dataclass_json
@@ -61,12 +60,3 @@ class SmartTask(Task):
 
     def get_lock_name(self) -> str:
         return f'{self.name}'
-
-    def log(self, message, log_method: Callable = logger.info):
-        if log_method == logger.exception or isinstance(message, BaseException):
-            logger.exception(message)
-        else:
-            log_method(f'[ Task {self.name} ]: '
-                       f'{message}. '
-                       f'Context: {self.context}. '
-                       f'Lock: {self.get_lock_name()}')
