@@ -1,7 +1,6 @@
 from django.contrib import admin
 from django.contrib.admin import ModelAdmin
 from django.db import models
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_json_widget.widgets import JSONEditorWidget
 
@@ -12,16 +11,35 @@ from contract_center.contract.models import Sync
 class SyncAdmin(ModelAdmin):
     fieldsets = (
         (
-            _('Control'),
+            _('Sync Settings'),
             {
                 'fields': (
                     'name',
                     'enabled',
+                    'process_enabled',
+                    'last_synced_block_number',
+                    'process_from_block',
+                    'process_block_range',
+                    'sync_block_range',
+                    'contract_genesis_block',
+                    'genesis_event_name',
                 )
             }
         ),
         (
-            _('Contract'),
+            _('Data Versioning'),
+            {
+                'fields': (
+                    'sync_data_version',
+                    'active_data_version',
+                    'create_new_version',
+                    'clear_versions',
+                    'auto_switch_to_synced_version',
+                )
+            }
+        ),
+        (
+            _('Contract Settings'),
             {
                 'fields': (
                     'contract_address',
@@ -30,21 +48,7 @@ class SyncAdmin(ModelAdmin):
             }
         ),
         (
-            _('Sync'), {
-                'fields': (
-                    'last_synced_block_number',
-                    'sync_block_range',
-                    'contract_genesis_block',
-                    'genesis_event_name',
-                    'sync_data_version',
-                    'active_data_version',
-                    'create_new_version',
-                    'clear_versions',
-                )
-            }
-        ),
-        (
-            _('Eth Node'), {
+            _('Eth Node Settings'), {
                 'fields': (
                     'node_http_address',
                     'node_websocket_address',
@@ -52,7 +56,7 @@ class SyncAdmin(ModelAdmin):
             }
         ),
         (
-            _('Connection'), {
+            _('Connection Settings'), {
                 'fields': (
                     'live_events_connect_timeout',
                     'live_events_read_timeout',
@@ -60,7 +64,7 @@ class SyncAdmin(ModelAdmin):
             }
         ),
         (
-            _('Extra'), {
+            _('Extra Settings'), {
                 'fields': (
                     'meta', 'event_names',
                 )
@@ -69,8 +73,8 @@ class SyncAdmin(ModelAdmin):
         (
             _('Date & Time'), {
                 'fields': (
-                    'createdAt',
-                    'updatedAt',
+                    'created_at',
+                    'updated_at',
                 )
             }
         ),
@@ -89,15 +93,18 @@ class SyncAdmin(ModelAdmin):
         models.JSONField: {'widget': JSONEditorWidget},
     }
     readonly_fields = (
-        'createdAt',
-        'updatedAt',
+        'created_at',
+        'updated_at',
     )
 
     def save_model(self, request, obj, form, change):
         if 'clear_versions' in form.changed_data:
             obj.clear_versions = True
+            obj.process_from_block = 0
         elif 'create_new_version' in form.changed_data:
             obj.create_new_version = True
+            obj.process_from_block = 0
         elif 'enabled' in form.changed_data and form.cleaned_data['enabled'] and not obj.sync_data_version:
             obj.create_new_version = True
+            obj.process_from_block = 0
         super().save_model(request, obj, form, change)

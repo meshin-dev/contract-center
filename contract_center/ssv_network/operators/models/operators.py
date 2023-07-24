@@ -1,28 +1,28 @@
+from enum import Enum
 from typing import Type
 
 from django.db import models
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
-from contract_center.ssv_network.models.events import EventModel
+from contract_center.ssv_network.models.events import TestnetEvent, MainnetEvent
 
 
 class OperatorModel(models.Model):
     """
     Base operator model
     """
-    operatorId = models.IntegerField(_("Operator ID"))
-    publicKey = models.TextField(_("Operator Public Key"))
-    ownerAddress = models.CharField(_("Owner Address"), max_length=255)
-
-    events = models.ManyToManyField(EventModel, blank=True)
+    operator_id = models.IntegerField(_("Operator ID"))
+    public_key = models.TextField(_("Operator Public Key"))
+    owner = models.CharField(_("Owner Address"), max_length=255)
+    block_number = models.BigIntegerField(_("Block Number"))
 
     fee = models.CharField(_("Fee"), max_length=255)
-    previousFee = models.CharField(_("Previous Fee"), max_length=255)
-    declaredFee = models.CharField(_("Declared Fee"), max_length=255)
+    previous_fee = models.CharField(_("Previous Fee"), max_length=255)
+    declared_fee = models.CharField(_("Declared Fee"), max_length=255)
 
-    isValid = models.BooleanField(_("Is Valid"), default=True)
-    isDeleted = models.BooleanField(_("Is Deleted"), default=False)
+    is_valid = models.BooleanField(_("Is Valid"), default=True)
+    is_deleted = models.BooleanField(_("Is Deleted"), default=False)
 
     errors = models.JSONField(_("Errors"), default=list, blank=True)
 
@@ -30,23 +30,33 @@ class OperatorModel(models.Model):
     network = models.CharField(_("Network"), max_length=255)
     data_version = models.BigIntegerField(_("Data Version"))
 
-    createdAt = models.DateTimeField(auto_now_add=True)
-    updatedAt = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         abstract = True
-        unique_together = ['operatorId', 'network', 'version', 'data_version']
+        unique_together = ['operator_id', 'network', 'version', 'data_version']
+
+    class Sync:
+        class Events(Enum):
+            OperatorAdded = 'OperatorAdded'
+            OperatorRemoved = 'OperatorRemoved'
+            OperatorFeeExecuted = 'OperatorFeeExecuted'
+            OperatorFeeDeclared = 'OperatorFeeDeclared'
 
     def get_absolute_url(self) -> str:
-        return reverse("operator:detail", kwargs={"operatorId": self.operatorId})
+        return reverse("operator:detail", kwargs={"operator_id": self.operator_id})
+
+    def __str__(self):
+        return f"<Operator version={self.version} network={self.network} id={self.operator_id} />"
 
 
 class TestnetOperator(OperatorModel):
-    pass
+    events = models.ManyToManyField(TestnetEvent, blank=True)
 
 
 class MainnetOperator(OperatorModel):
-    pass
+    events = models.ManyToManyField(MainnetEvent, blank=True)
 
 
 def get_operator_model(network: str) -> Type[OperatorModel]:

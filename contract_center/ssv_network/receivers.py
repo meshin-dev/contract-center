@@ -93,8 +93,7 @@ def contract_fetched_events_receiver(
                              f'Lock: {instance.get_lock_name()}')
                 EventsProcessTask().apply_async(
                     kwargs=dict(
-                        version=version,
-                        network=network
+                        name=instance.sync.name
                     )
                 )
                 last_time = time.time()
@@ -103,8 +102,7 @@ def contract_fetched_events_receiver(
     if at_least_one_created:
         EventsProcessTask().apply_async(
             kwargs=dict(
-                version=version,
-                network=network
+                name=instance.sync.name
             )
         )
 

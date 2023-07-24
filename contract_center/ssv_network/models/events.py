@@ -22,8 +22,8 @@ class EventModel(models.Model):
     network = models.CharField(_("Network"), max_length=255)
     data_version = models.BigIntegerField(_("Data Version"))
 
-    createdAt = models.DateTimeField(auto_now_add=True)
-    updatedAt = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         abstract = True

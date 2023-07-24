@@ -123,8 +123,6 @@ class Web3Contract:
         self,
         block_from: int,
         block_to: int,
-        max_retries: int = 3,
-        retry_delay: int = 1,
         source: str = 'http',
         *args,
         **kwargs,
@@ -141,20 +139,14 @@ class Web3Contract:
         filters = web3.eth.filter(filter_params)
 
         # Fetch the logs
-        logs = []
-        for i in range(0, max_retries):
-            try:
-                logs = filters.get_all_entries()
-                break
-            except Exception as e:
-                logger.error(f'Failed to fetch logs for {self.name} contract. '
-                             f'Filters: {filter_params}. Retrying...')
-                logger.exception(e)
-                time.sleep(retry_delay)
-                retry_delay *= 1.5
-                continue
-
-        return sanitize_events([self.decode_log(raw_log) for raw_log in logs])
+        try:
+            logs = filters.get_all_entries()
+        except Exception as e:
+            logger.error(f'Failed to fetch logs for {self.name} contract. '
+                         f'Filters: {filter_params}. Retrying...')
+            logger.exception(e)
+            raise e
+        return sanitize_events([self.decode_log(raw_log) for raw_log in logs or []])
 
     def event_fetch(
         self,
@@ -166,7 +158,7 @@ class Web3Contract:
         source: str = 'http'
     ):
         """
-        Fetches event logs from a specific range of blocks for a given event name. If the attempt to fetch logs fails,
+        Fetches for specific event in range of blocks. If the attempt to fetch logs fails,
         it will retry fetching a specified number of times with a delay of one second between retries.
 
         :param event: Name of the event for which logs are being fetched.
@@ -205,7 +197,7 @@ class Web3Contract:
         source: str = 'http'
     ) -> List[Dict]:
         """
-        Fetches all events for the specified blocks using multi-threading.
+        Fetches specific list of events blocks range using multi-threading.
 
         This method creates a thread-safe list to store all events, and uses a ThreadPoolExecutor to fetch events
         in parallel. If an exception occurs during the process, the executor is shut down gracefully.

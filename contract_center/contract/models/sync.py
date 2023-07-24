@@ -20,10 +20,16 @@ class Sync(models.Model):
         help_text=_('Unique sync name as a slug to safely use across all workers and as part of lock names')
     )
     enabled = models.BooleanField(
-        _('Enabled'),
+        _('Events Sync Enabled'),
         default=False,
         blank=True,
         help_text=_('Dynamically enable or disable this sync')
+    )
+    process_enabled = models.BooleanField(
+        _('Events Processing Enabled'),
+        default=False,
+        blank=True,
+        help_text=_('Dynamically enable or disable events processing')
     )
 
     # Data versioning so that it would be easy to switch between versions or sync next data while using current one
@@ -46,6 +52,23 @@ class Sync(models.Model):
     clear_versions = models.BooleanField(
         default=False,
         help_text=_('Clear all versions of the data. If sync is active, it will be stopped')
+    )
+    auto_switch_to_synced_version = models.BooleanField(
+        default=False,
+        help_text=_('Automatically switch to synced version when sync is finished')
+    )
+    process_from_block = models.BigIntegerField(
+        blank=True,
+        null=True,
+        help_text=_('Block from which the sync should process events. '
+                    'If empty - it will automatically calculate first available block in events table. '
+                    'During processing new events, this field will be updated with the last processed block')
+    )
+    process_block_range = models.IntegerField(
+        _("Process Block Range"),
+        default=10,
+        blank=True,
+        help_text=_('How many blocks should be processed per one task')
     )
     contract_address = models.CharField(
         _("Contract Address"),
@@ -118,8 +141,8 @@ class Sync(models.Model):
         default=list,
         help_text=_('Array of event names that should be synced')
     )
-    createdAt = models.DateTimeField(auto_now_add=True)
-    updatedAt = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         pass
@@ -164,9 +187,12 @@ class Sync(models.Model):
         super().save(*args, **kwargs)
 
     def switch_latest_data_version(self) -> None:
-        if self.sync_data_version and not self.is_latest_data_version():
+        if self.sync_data_version != self.is_latest_data_version() and self.auto_switch_to_synced_version:
             self.active_data_version = self.sync_data_version
             self.save()
 
     def is_latest_data_version(self) -> bool:
         return self.sync_data_version == self.active_data_version
+
+    def __str__(self):
+        return f'{self.name.replace("_", " ").title()}'
