@@ -55,6 +55,7 @@ def contract_fetched_events_receiver(
 
     at_least_one_created = False
     last_time = time.time() - 1
+    most_recent_block_number = None
     for event in events:
         _, created = event_model.objects.get_or_create(
             transactionHash=event['transactionHash'],
@@ -76,7 +77,7 @@ def contract_fetched_events_receiver(
             # Save last synced block number after each raw event saved.
             # Do it anyway so that on a next raw events fetch task it will continue from
             # the place where it was saved successfully last time
-            instance.sync.last_synced_block_number = event['blockNumber']
+            most_recent_block_number = instance.sync.last_synced_block_number = event['blockNumber']
             instance.sync.save(update_fields=['last_synced_block_number'])
 
             result.saved_total += 1
@@ -106,7 +107,9 @@ def contract_fetched_events_receiver(
             )
         )
 
-    instance.sync.last_synced_block_number = params.get('block_to')
-    instance.sync.save(update_fields=['last_synced_block_number'])
+    # If there was any data - save the higher block number
+    if most_recent_block_number:
+        instance.sync.last_synced_block_number = most_recent_block_number
+        instance.sync.save(update_fields=['last_synced_block_number'])
 
     return result

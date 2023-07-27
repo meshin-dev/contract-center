@@ -230,6 +230,8 @@ class EventsFetchTask(SmartTask):
 
             # If no events are fetched, update last_synced_block_number and return
             if not len(events):
+                # For the case when there is some delay in a node, we need to make sure we don't miss any events
+                # by decrementing block_from by block_from_back_offset
                 self.sync.last_synced_block_number = block_to - self.block_from_back_offset
                 self.get_lock_manager().submit(lambda: self.sync.save(update_fields=['last_synced_block_number']))
                 self.get_lock_manager().wait_for_futures()
