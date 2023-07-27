@@ -69,17 +69,19 @@ def contract_fetched_events_receiver(
                 **event,
             )
         )
+
+        # Save last synced block number after each raw event saved.
+        # Do it anyway so that on a next raw events fetch task it will continue from
+        # the place where it was saved successfully last time
         at_least_one_created = at_least_one_created or created
+        most_recent_block_number = event['blockNumber']
+        if instance.sync.last_synced_block_number < most_recent_block_number:
+            instance.sync.last_synced_block_number = most_recent_block_number
+            instance.sync.save(update_fields=['last_synced_block_number'])
+
         if created:
             result.saved_events[event['event']] = result.saved_events.get(event['event']) or 0
             result.saved_events[event['event']] += 1
-
-            # Save last synced block number after each raw event saved.
-            # Do it anyway so that on a next raw events fetch task it will continue from
-            # the place where it was saved successfully last time
-            most_recent_block_number = instance.sync.last_synced_block_number = event['blockNumber']
-            instance.sync.save(update_fields=['last_synced_block_number'])
-
             result.saved_total += 1
             logger.debug(f'Saved raw event for version {version} and network {network}: {event}. '
                          f'Task: {instance.name}. '
@@ -108,7 +110,7 @@ def contract_fetched_events_receiver(
         )
 
     # If there was any data - save the higher block number
-    if most_recent_block_number:
+    if most_recent_block_number and instance.sync.last_synced_block_number < most_recent_block_number:
         instance.sync.last_synced_block_number = most_recent_block_number
         instance.sync.save(update_fields=['last_synced_block_number'])
 

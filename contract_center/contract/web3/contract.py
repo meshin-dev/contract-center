@@ -139,13 +139,7 @@ class Web3Contract:
         filters = web3.eth.filter(filter_params)
 
         # Fetch the logs
-        try:
-            logs = filters.get_all_entries()
-        except Exception as e:
-            logger.error(f'Failed to fetch logs for {self.name} contract. '
-                         f'Filters: {filter_params}. Retrying...')
-            logger.exception(e)
-            raise e
+        logs = filters.get_all_entries()
         return sanitize_events([self.decode_log(raw_log) for raw_log in logs or []])
 
     def event_fetch(

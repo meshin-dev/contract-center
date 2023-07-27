@@ -129,7 +129,8 @@ function data_menu() {
                 break
                 ;;
             "Erase Testnet Data")
-                run_command_based_on_answer "Sure?" "docker-compose run --rm django python manage.py flush contract_center.ssv_network.models.events.TestnetEvent,contract_center.ssv_network.operators.models.operators.TestnetOperator"
+                read -p "Data versions: " data_versions
+                run_command_based_on_answer "Sure?" "docker-compose run --rm django python manage.py flush --data-versions $data_versions --models contract_center.ssv_network.models.events.TestnetEvent,contract_center.ssv_network.operators.models.operators.TestnetOperator"
                 data_menu
                 break
                 ;;

@@ -9,7 +9,6 @@ from redis import Redis
 from redis.lock import Lock
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 class LockManager:

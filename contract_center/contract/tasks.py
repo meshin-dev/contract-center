@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 import time
@@ -96,7 +97,7 @@ class EventsFetchTask(SmartTask):
             block_last_synced = self.contract.get_genesis_block_number(
                 genesis_event_name=self.sync.genesis_event_name or GENESIS_EVENT_NAME_DEFAULT
             )
-            if not self.sync.contract_genesis_block:
+            if not self.sync.contract_genesis_block and block_last_synced >= 0:
                 self.sync.contract_genesis_block = block_last_synced
                 self.sync.save(update_fields=['contract_genesis_block'])
 
@@ -117,12 +118,11 @@ class EventsFetchTask(SmartTask):
             ),
             current_block
         )
-        self.last_chunk_size = block_to - block_from
 
-        # If block_to equals current_block, decrement block_from by 2 to ensure we don't miss data due
-        # to potential delays in event fetching from the Ethereum node
-        if block_to == current_block:
-            block_from -= self.block_from_back_offset
+        # Control for not going out of available blocks range
+        block_to = min(block_to, current_block)
+        block_from = min(block_from, block_to)
+        self.last_chunk_size = block_to - block_from
 
         return block_from, block_to, current_block
 
@@ -141,7 +141,6 @@ class EventsFetchTask(SmartTask):
         """
         events = []
         can_self_call = False
-        block_from = block_to = current_block = None
         fetch_task_result = EventsFetchTaskResult(
             task=self.name,
             context=self.context,
@@ -213,17 +212,27 @@ class EventsFetchTask(SmartTask):
                     logger.debug(f'Fetched {len(events)} new events')
                     break
                 except (Exception, ValueError) as e:
-                    logger.error(f'Could not fetch new events: {e}')
+                    logger.error(f'Could not fetch new events: {e.args}')
 
+                    # Figure out next block_to value
+                    if isinstance(e, ValueError) and '-32000' in str(e.args):
+                        rpc_response = json.loads(str(e.args))
+                        if rpc_response.get('code') in (-32000,):
+                            block_to -= 1
+                    else:
+                        # RPC:-32602 (log size exceeded) and others
+                        old_block_to = block_to
+                        block_to = max(block_from, block_to - math.ceil((block_to - block_from) * 0.5))
+                        logger.debug(f'Decreasing block_to from {old_block_to} to {block_to}')
+
+                    # Check if we can retry
                     if fetch_retries > 0:
+                        fetch_retries -= 1
+                        fetch_delay *= 1.2
                         logger.debug(f'Retrying in {fetch_delay} seconds...')
                         time.sleep(fetch_delay)
-                        fetch_retries -= 1
-                        fetch_delay *= 2
-                        block_to = max(block_from, block_to - math.ceil((block_to - block_from) * 0.5))
                         continue
 
-                    logger.exception(e)
                     fetch_task_result.reason = f'Could not fetch new events'
                     fetch_task_result.error = str(e)
                     return fetch_task_result.to_dict()
@@ -232,7 +241,10 @@ class EventsFetchTask(SmartTask):
             if not len(events):
                 # For the case when there is some delay in a node, we need to make sure we don't miss any events
                 # by decrementing block_from by block_from_back_offset
-                self.sync.last_synced_block_number = block_to - self.block_from_back_offset
+                if block_to == current_block:
+                    self.sync.last_synced_block_number = current_block - self.block_from_back_offset
+                else:
+                    self.sync.last_synced_block_number = block_to
                 self.get_lock_manager().submit(lambda: self.sync.save(update_fields=['last_synced_block_number']))
                 self.get_lock_manager().wait_for_futures()
 
@@ -249,7 +261,6 @@ class EventsFetchTask(SmartTask):
                     events=events,
                 ))
                 results: List[EventReceiverResult] = self.get_lock_manager().result()
-                can_self_call = True
             except Exception as e:
                 fetch_task_result.reason = f'Could not send new events signal to receivers'
                 fetch_task_result.error = str(e)
@@ -259,6 +270,14 @@ class EventsFetchTask(SmartTask):
             if not len(results):
                 fetch_task_result.reason = f'Nobody is listening for new events'
                 return fetch_task_result.to_dict()
+
+            can_self_call = sum(result[1].saved_total for result in results)
+
+            # If there were events but none of them were saved, try again later with back offset
+            if not can_self_call and block_to == current_block and block_to != block_from:
+                self.sync.last_synced_block_number = block_to - self.block_from_back_offset
+                self.get_lock_manager().submit(lambda: self.sync.save(update_fields=['last_synced_block_number']))
+                self.get_lock_manager().wait_for_futures()
 
             fetch_task_result.total_events = len(events)
             fetch_task_result.results = [result[1].to_dict() for result in results]
@@ -274,7 +293,7 @@ class EventsFetchTask(SmartTask):
         finally:
             # Check if we need to call self again
             self.get_lock_manager().close()
-            if current_block and block_to and current_block - block_to > self.minimum_blocks_to_fetch and can_self_call:
+            if can_self_call:
                 logger.debug(f'Calling self again because not reached latest block...')
                 kwargs = {
                     **kwargs,
