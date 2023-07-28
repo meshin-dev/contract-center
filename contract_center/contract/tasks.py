@@ -205,7 +205,7 @@ class EventsFetchTask(SmartTask):
                     events=self.sync.event_names,
                 )
                 try:
-                    logger.debug(f'Fetching new events...')
+                    logger.debug(f'Fetching new events from {block_to - block_from + 1} blocks')
                     self.get_lock_manager().submit(lambda: self.contract.get_logs(**fetch_params))
                     events: List[Dict] = self.get_lock_manager().result()
                     self.last_events_count = len(events)

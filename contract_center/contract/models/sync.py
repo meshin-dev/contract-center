@@ -187,7 +187,7 @@ class Sync(models.Model):
         super().save(*args, **kwargs)
 
     def switch_latest_data_version(self) -> None:
-        if self.sync_data_version != self.is_latest_data_version() and self.auto_switch_to_synced_version:
+        if not self.is_latest_data_version() and self.auto_switch_to_synced_version:
             self.active_data_version = self.sync_data_version
             self.save()
 

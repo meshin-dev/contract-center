@@ -194,6 +194,7 @@ class EventsProcessTask(SmartTask):
         if self.get_lock_manager().lock_owned():
             # Check if possible to trigger self to immediately process next events
             if self.can_self_schedule:
+                logger.debug(f'Self scheduling for next events processing: {self.sync.name}')
                 self.get_lock_manager().submit(lambda: self.get_events_for_processing(count=True))
                 events_to_process_count = self.get_lock_manager().result()
                 if events_to_process_count > 0:
@@ -203,16 +204,15 @@ class EventsProcessTask(SmartTask):
                             countdown=1,
                         )
                     )
-            else:
-                # If no events to process, switch to latest data version if enabled such feature
-                self.get_lock_manager().submit(self.sync.switch_latest_data_version)
-                self.get_lock_manager().result()
 
-        # Close lock manager
+            self.get_lock_manager().submit(self.sync.switch_latest_data_version)
+            self.get_lock_manager().result()
+        else:
+            self.sync.switch_latest_data_version()
         self.get_lock_manager().close()
 
     def get_event_model(self) -> Type[EventModel]:
-        # Get proper model to get events
+        # Get a proper model to get events
         try:
             event_model: Type[EventModel] = get_event_model(self.sync.meta.get('network'))
             if not event_model:
