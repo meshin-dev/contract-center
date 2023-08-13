@@ -288,7 +288,10 @@ class EventsFetchTask(SmartTask):
             logger.error('Can not fetch events')
             logger.exception(e)
             fetch_task_result.reason = f'Can not fetch events'
-            fetch_task_result.error = str(e)
+            try:
+                fetch_task_result.error = json.loads(str(e))
+            except:
+                fetch_task_result.error = str(e)
             return fetch_task_result.to_dict()
         finally:
             # Check if we need to call self again

@@ -139,7 +139,18 @@ class Web3Contract:
         filters = web3.eth.filter(filter_params)
 
         # Fetch the logs
-        logs = filters.get_all_entries()
+        try:
+            logs = filters.get_all_entries()
+        except ValueError as e:
+            error_details = e.args[0]
+            error_code = error_details.get('code')
+            # @url https://eips.ethereum.org/EIPS/eip-1474
+            if error_code == -32000 or 'filter not found' in str(error_details):
+                # Recreate the filter
+                filters = web3.eth.filter(filter_params)
+                logs = filters.get_all_entries()
+            else:
+                raise
         return sanitize_events([self.decode_log(raw_log) for raw_log in logs or []])
 
     def event_fetch(
