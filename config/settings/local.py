@@ -93,8 +93,21 @@ LOGGING = {
             },
         },
     },
-    'root': {
-        'handlers': ['console'],
-        'level': 'DEBUG',
-    },
+    'loggers': {
+        '': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'django': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'contract_center': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    }
 }

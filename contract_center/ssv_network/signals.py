@@ -1,3 +1,3 @@
 import django.dispatch
 
-process_event_signal = django.dispatch.Signal()
+event_process_signal = django.dispatch.Signal()

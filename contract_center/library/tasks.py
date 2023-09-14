@@ -1,6 +1,5 @@
 import logging
 from dataclasses import dataclass, field
-from typing import Callable
 
 from celery import Task
 from dataclasses_json import dataclass_json
@@ -36,37 +35,27 @@ class SmartTask(Task):
     # Period in seconds to reacquire a lock on a task if its long-lasting
     lock_extend_from_sec = 2
 
-    # Lock manager instance
-    lock_manager: LockManager = None
-
-    # Some context specific to particular task
-    context: dict = {
-        'type': 'periodic'
-    }
+    def __init__(self):
+        super().__init__()
+        self.manager = None
+        self.context: dict = {
+            'type': 'periodic'
+        }
 
     def get_lock_manager(self) -> LockManager:
         """
         Building lock manager instance based on task preferences
         :return:
         """
-        if not self.lock_manager:
-            self.lock_manager = LockManager(
+        if not self.manager:
+            self.manager = LockManager(
                 lock=self.get_lock_name(),
                 lock_timeout_sec=self.lock_timeout_sec,
                 lock_extend_from_sec=self.lock_extend_from_sec,
                 lock_blocking_timeout_sec=self.lock_blocking_timeout_sec,
             )
-            self.lock_manager.set_redis_client(caches['default'])
-        return self.lock_manager
+            self.manager.set_redis_client(caches['default'])
+        return self.manager
 
     def get_lock_name(self) -> str:
         return f'{self.name}'
-
-    def log(self, message, log_method: Callable = logger.info):
-        if log_method == logger.exception or isinstance(message, BaseException):
-            logger.exception(message)
-        else:
-            log_method(f'[ Task {self.name} ]: '
-                       f'{message}. '
-                       f'Context: {self.context}. '
-                       f'Lock: {self.get_lock_name()}')

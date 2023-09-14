@@ -5,7 +5,15 @@
     "fields": {
         "name": "ssv_network_stage_v4_prater",
         "enabled": false,
-        "contract_address": "0x45B831727DC96035e6a2f77AAAcE4835195a54Af",
+        "process_enabled": false,
+        "sync_data_version": 0,
+        "active_data_version": 0,
+        "create_new_version": false,
+        "clear_versions": false,
+        "auto_switch_to_synced_version": false,
+        "process_from_block": null,
+        "process_block_range": 1000,
+        "contract_address": "0xd6b633304Db2DD59ce93753FA55076DA367e5b2c",
         "contract_abi": [
             {
                 "name": "ApprovalNotWithinTimeframe",
@@ -84,6 +92,11 @@
             },
             {
                 "name": "InvalidPublicKeyLength",
+                "type": "error",
+                "inputs": []
+            },
+            {
+                "name": "MaxValueExceeded",
                 "type": "error",
                 "inputs": []
             },
@@ -998,21 +1011,14 @@
                 ],
                 "outputs": [
                     {
-                        "name": "",
-                        "type": "tuple",
-                        "components": [
-                            {
-                                "name": "registerOperator",
-                                "type": "bool",
-                                "internalType": "bool"
-                            },
-                            {
-                                "name": "registerValidator",
-                                "type": "bool",
-                                "internalType": "bool"
-                            }
-                        ],
-                        "internalType": "struct Authorization"
+                        "name": "authOperators",
+                        "type": "bool",
+                        "internalType": "bool"
+                    },
+                    {
+                        "name": "authValidators",
+                        "type": "bool",
+                        "internalType": "bool"
                     }
                 ],
                 "stateMutability": "view"
@@ -1029,22 +1035,22 @@
                     {
                         "name": "ssvOperators_",
                         "type": "address",
-                        "internalType": "contract IFnSSVOperators"
+                        "internalType": "contract ISSVOperators"
                     },
                     {
                         "name": "ssvClusters_",
                         "type": "address",
-                        "internalType": "contract IFnSSVClusters"
+                        "internalType": "contract ISSVClusters"
                     },
                     {
                         "name": "ssvDAO_",
                         "type": "address",
-                        "internalType": "contract IFnSSVDAO"
+                        "internalType": "contract ISSVDAO"
                     },
                     {
                         "name": "ssvViews_",
                         "type": "address",
-                        "internalType": "contract IFnSSVViews"
+                        "internalType": "contract ISSVViews"
                     },
                     {
                         "name": "minimumBlocksBeforeLiquidation_",
@@ -1432,21 +1438,14 @@
                         "internalType": "address"
                     },
                     {
-                        "name": "auth",
-                        "type": "tuple",
-                        "components": [
-                            {
-                                "name": "registerOperator",
-                                "type": "bool",
-                                "internalType": "bool"
-                            },
-                            {
-                                "name": "registerValidator",
-                                "type": "bool",
-                                "internalType": "bool"
-                            }
-                        ],
-                        "internalType": "struct Authorization"
+                        "name": "authOperator",
+                        "type": "bool",
+                        "internalType": "bool"
+                    },
+                    {
+                        "name": "authValidator",
+                        "type": "bool",
+                        "internalType": "bool"
                     }
                 ],
                 "outputs": [],
@@ -1518,6 +1517,24 @@
                 "stateMutability": "nonpayable"
             },
             {
+                "name": "updateModule",
+                "type": "function",
+                "inputs": [
+                    {
+                        "name": "moduleId",
+                        "type": "uint8",
+                        "internalType": "enum SSVModules"
+                    },
+                    {
+                        "name": "moduleAddress",
+                        "type": "address",
+                        "internalType": "address"
+                    }
+                ],
+                "outputs": [],
+                "stateMutability": "nonpayable"
+            },
+            {
                 "name": "updateNetworkFee",
                 "type": "function",
                 "inputs": [
@@ -1538,24 +1555,6 @@
                         "name": "percentage",
                         "type": "uint64",
                         "internalType": "uint64"
-                    }
-                ],
-                "outputs": [],
-                "stateMutability": "nonpayable"
-            },
-            {
-                "name": "upgradeModule",
-                "type": "function",
-                "inputs": [
-                    {
-                        "name": "moduleId",
-                        "type": "uint8",
-                        "internalType": "enum SSVModules"
-                    },
-                    {
-                        "name": "moduleAddress",
-                        "type": "address",
-                        "internalType": "address"
                     }
                 ],
                 "outputs": [],
@@ -1688,9 +1687,9 @@
             }
         ],
         "last_synced_block_number": 0,
-        "contract_genesis_block": 0,
+        "contract_genesis_block": 9249887,
         "genesis_event_name": "Initialized",
-        "sync_block_range": 100,
+        "sync_block_range": 1000,
         "node_http_address": "https://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA",
         "node_websocket_address": "wss://eth-goerli.g.alchemy.com/v2/rI4bIEGveSkw0KYAYO8VMIuMJA0QtNIA",
         "live_events_connect_timeout": 60,
@@ -1712,8 +1711,8 @@
             "ClusterWithdrawn",
             "FeeRecipientAddressUpdated"
         ],
-        "createdAt": "2023-06-12T20:16:29.906Z",
-        "updatedAt": "2023-06-27T08:33:28.513Z"
+        "created_at": "2023-06-12T20:16:29.906Z",
+        "updated_at": "2023-07-13T14:50:20.350Z"
     }
 }
 ]

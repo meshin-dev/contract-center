@@ -28,5 +28,6 @@ def sanitize_events(events: List[Union[Dict, AttributeDict]]) -> List[Dict]:
     :param events:
     :return:
     """
+    events = list(filter(None, events))
     events = sorted(events, key=lambda log: (log['blockNumber'], log['transactionIndex']))
     return [json.loads(json.dumps(event, cls=HexBytesEncoder)) for event in events]

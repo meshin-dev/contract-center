@@ -5,11 +5,14 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from django_json_widget.widgets import JSONEditorWidget
 
-from contract_center.ssv_network.models.events import TestnetV4Event, MainnetV4Event, EventModel
+from contract_center.library.helpers.links import get_etherscan_link
+from contract_center.ssv_network.models.events import TestnetEvent, MainnetEvent, EventModel
+
+dont_break_style = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'
 
 
-@admin.register(TestnetV4Event)
-class TestnetV4EventAdmin(ModelAdmin):
+@admin.register(TestnetEvent)
+class TestnetEventAdmin(ModelAdmin):
     fieldsets = (
         (
             _("Data"), {
@@ -30,6 +33,7 @@ class TestnetV4EventAdmin(ModelAdmin):
         (
             _("Processing"), {
                 "fields": (
+                    "data_version",
                     "process_status",
                     "errors",
                 )
@@ -38,15 +42,15 @@ class TestnetV4EventAdmin(ModelAdmin):
         (
             _("Date & Time"), {
                 "fields": (
-                    "createdAt",
-                    "updatedAt",
+                    "created_at",
+                    "updated_at",
                 )
             }
         ),
     )
-    list_display = ["event", "owner_address", "transaction_hash"]
+    list_display = ["network", "version", "event", "owner_address", "transaction_hash", "block_number", "transactionIndex"]
     search_fields = ["event", "address", "transactionHash", "args"]
-    ordering = ["blockNumber", "transactionIndex"]
+    ordering = ["-blockNumber", "-transactionIndex"]
     formfield_overrides = {
         models.JSONField: {'widget': JSONEditorWidget},
     }
@@ -60,51 +64,40 @@ class TestnetV4EventAdmin(ModelAdmin):
         "transactionIndex",
         "transaction_hash",
         "blockHash",
-        "createdAt",
-        "updatedAt",
+        "data_version",
+        "created_at",
+        "updated_at",
     )
+    list_filter = ('network', 'version', 'data_version', 'process_status', 'event',)
 
-    # TODO: extract this logic to reusable methods
     def block_number(self, obj: EventModel):
-        links = {
-            'goerli': 'https://goerli.etherscan.io/block/%s',
-            'prater': 'https://goerli.etherscan.io/block/%s',
-            'mainnet': 'https://etherscan.io/block/%s',
-        }
         return format_html(
-            '<a href="{}" target="_blank">{}</a>',
-            links.get(str(obj.network)) % obj.blockNumber,
+            '<a href="{}" target="_blank" style="{}">{} ↗️</a>',
+            get_etherscan_link(str(obj.network), 'block/%s') % obj.blockNumber,
+            dont_break_style,
             obj.blockNumber
         )
 
     def owner_address(self, obj: EventModel):
-        links = {
-            'goerli': 'https://goerli.etherscan.io/address/%s',
-            'prater': 'https://goerli.etherscan.io/address/%s',
-            'mainnet': 'https://etherscan.io/address/%s',
-        }
         return format_html(
-            '<a href="{}" target="_blank">{}</a>',
-            links.get(str(obj.network)) % obj.address,
+            '<a href="{}" target="_blank" style="{}">{} ↗️</a>',
+            get_etherscan_link(str(obj.network), 'address/%s') % obj.address,
+            dont_break_style,
             obj.address
         )
 
     def transaction_hash(self, obj: EventModel):
-        links = {
-            'goerli': 'https://goerli.etherscan.io/tx/%s',
-            'prater': 'https://goerli.etherscan.io/tx/%s',
-            'mainnet': 'https://etherscan.io/tx/%s',
-        }
         hash = str(obj.transactionHash)
         if not hash.startswith('0x'):
             hash = '0x' + hash
         return format_html(
-            '<a href="{}" target="_blank">{}</a>',
-            links.get(str(obj.network)) % hash,
+            '<a href="{}" target="_blank" style="{}">{} ↗️</a>',
+            get_etherscan_link(str(obj.network), 'tx/%s') % hash,
+            dont_break_style,
             hash
         )
 
 
-@admin.register(MainnetV4Event)
-class TestnetV4EventAdmin(TestnetV4EventAdmin):
+@admin.register(MainnetEvent)
+class TestnetEventAdmin(TestnetEventAdmin):
     pass
