@@ -103,7 +103,24 @@ class Sync(models.Model):
         _("Block Range"),
         default=1000,
         blank=True,
-        help_text='Set as 0 to always take till current block'
+        help_text=_('Set as 0 to always take till current block')
+    )
+    sync_block_range_effective = models.BooleanField(
+        _('Effective block range'),
+        default=True,
+        blank=True,
+        help_text=_('Sync block range is effective only on successful flow. '
+                    'If error happens during fetch - it will be decreased gradually up to minimal blocks to fetch. '
+                    'Initially it is effective, but will become not effective once there will be fetch error. '
+                    'If block range is effective, it will be increased by multiplier. ')
+    )
+    sync_block_range_effective_multiplier = models.FloatField(
+        _('Effective block range multiplier'),
+        default=0.8,
+        blank=True,
+        help_text=_('Multiplier which block range will be multiplied on in case of unsuccessful block range fetch. '
+                    'Each round it will decrease block range up to amount which is possible to fetch, up to minimum '
+                    'blocks to fetch defined in fetch task class field.')
     )
     node_http_address = models.CharField(
         _("Node HTTP Address"),
