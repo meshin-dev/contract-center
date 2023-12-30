@@ -3,17 +3,16 @@ import logging
 import math
 import time
 from dataclasses import dataclass
-from typing import List, Union, Dict, Tuple
+from typing import List, Union, Dict, Tuple, Any
 
 from dataclasses_json import dataclass_json
 
 from config.celery_app import app
-from contract_center.library.locks import LockManager
-from contract_center.library.tasks import SmartTask, TaskResult
 from contract_center.contract.models.sync import Sync, GENESIS_EVENT_NAME_DEFAULT
-from contract_center.contract.receivers import EventReceiverResult
 from contract_center.contract.signals import contract_fetched_events_signal
 from contract_center.contract.web3.contract import Web3Contract
+from contract_center.library.locks import LockManager
+from contract_center.library.tasks import SmartTask, TaskResult
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +35,11 @@ class EventsFetchTask(SmartTask):
 
     sync: Sync = None
     manager: LockManager = None
-    block_from_back_offset = 2
-    minimum_blocks_to_fetch = 10
+
+    # This is absolute minimum blocks to fetch.
+    # Even if max synced block is less than current block - 12 - use 12 as min diff
+    minimum_blocks_to_fetch = 12
+
     web3_contract: Web3Contract = None
 
     def __init__(self):
@@ -56,7 +58,6 @@ class EventsFetchTask(SmartTask):
         """
         if not self.web3_contract:
             self.web3_contract = Web3Contract(
-                name=self.sync.name,
                 node_http_address=self.sync.node_http_address,
                 node_websocket_address=self.sync.node_websocket_address,
                 contract_address=self.sync.contract_address,
@@ -89,40 +90,72 @@ class EventsFetchTask(SmartTask):
         block_last_synced = -1
         try:
             block_last_synced = max(self.sync.last_synced_block_number, self.sync.contract_genesis_block)
+            logger.debug(f'Last synced block as maximum between '
+                         f'Sync::last_synced_block_number ({self.sync.last_synced_block_number}) '
+                         f'and contract genesis block ({block_last_synced})')
         except ValueError:
             pass
 
         # If was empty or -1 - then take genesis block
         if block_last_synced <= 0:
+            logger.debug(f'Requesting contract genesis block...')
             block_last_synced = self.contract.get_genesis_block_number(
                 genesis_event_name=self.sync.genesis_event_name or GENESIS_EVENT_NAME_DEFAULT
-            )
+            ) - 1
+            logger.debug(f'Contract genesis block: {block_last_synced}')
             if not self.sync.contract_genesis_block and block_last_synced >= 0:
                 self.sync.contract_genesis_block = block_last_synced
                 self.sync.save(update_fields=['contract_genesis_block'])
+                logger.debug(f'Saved genesis block in Sync model')
 
+        # Get current block number from chain
         current_block = int(self.contract.web3_http.eth.get_block('latest').get('number'))
-        block_from = block_last_synced + 1 \
-            if block_last_synced >= 0 \
-            else current_block
+        logger.debug(f'Current latest block: {current_block}')
 
-        # Calculate block_to as either block_from plus minimum_blocks_to_fetch or current_block - 2
-        # whichever is less, ensuring block_to is never greater than current_block.
-        self.last_chunk_size = self.last_chunk_size or (self.sync.sync_block_range or self.minimum_blocks_to_fetch)
-        block_to = min(
-            block_from + self.contract.estimate_next_chunk_size(
-                current_chunk_size=self.last_chunk_size,
-                event_found_count=self.last_events_count,
-                min_scan_chunk_size=self.minimum_blocks_to_fetch,
-                max_scan_chunk_size=self.sync.sync_block_range,
-            ),
-            current_block
+        # If last synced block is available - start from it
+        # If last synced isn't available - consider it as current block.
+        block_from = block_last_synced + 1 if block_last_synced >= 0 else current_block
+
+        # Ensure block range
+        if not self.sync.sync_block_range or self.sync.sync_block_range <= 0:
+            self.sync.sync_block_range = self.minimum_blocks_to_fetch
+
+        # Ensure to have effective block range always decreasing or increasing
+        prev_sync_block_range = self.sync.sync_block_range
+        self.sync.sync_block_range = max(
+            self.minimum_blocks_to_fetch,
+            min(
+                # One million blocks will be absolute maximum for sync
+                1000_000,
+                math.ceil(
+                    self.sync.sync_block_range * self.sync.sync_block_range_effective_multiplier
+                    if not self.sync.sync_block_range_effective
+                    else self.sync.sync_block_range * (2 - self.sync.sync_block_range_effective_multiplier)
+                )
+            )
         )
 
+        # Save current settings
+        if prev_sync_block_range != self.sync.sync_block_range:
+            logger.debug(f'Saving Sync::sync_block_range as {self.sync.sync_block_range}')
+            self.sync.save(update_fields=['sync_block_range'])
+
         # Control for not going out of available blocks range
-        block_to = min(block_to, current_block)
+        block_to = min(block_from + self.sync.sync_block_range, current_block)
         block_from = min(block_from, block_to)
+        logger.debug(f'Border controls blocks: [{block_from}; {block_to}]')
+
+        # Make sure to always fetch at least minimum blocks required
+        if block_to - block_from < self.minimum_blocks_to_fetch:
+            block_from = max(
+                self.sync.contract_genesis_block,
+                block_from - self.minimum_blocks_to_fetch,
+            )
+            logger.debug(f'Minimum blocks to fetch block_from correction: {block_from}')
+
+        # Remember last chunk size
         self.last_chunk_size = block_to - block_from
+        logger.debug(f'Last chunk size saved as: {self.last_chunk_size}')
 
         return block_from, block_to, current_block
 
@@ -152,7 +185,7 @@ class EventsFetchTask(SmartTask):
             sync_name = kwargs.get('name', None)
             if not sync_name:
                 fetch_task_result.reason = f'Wrong parameters. Provide {{"name": "..."}} in task Keyword Arguments. ' \
-                                            f'kwargs: {kwargs}'
+                                           f'kwargs: {kwargs}'
                 return fetch_task_result.to_dict()
 
             # Get sync object
@@ -174,21 +207,23 @@ class EventsFetchTask(SmartTask):
                 fetch_task_result.reason = f'Wrong parameters. ' \
                                            f'Provide {{"context": {{"type": "...", ...}}}} ' \
                                            f'in task Keyword Arguments. ' \
-                                            f'kwargs: {kwargs}'
+                                           f'kwargs: {kwargs}'
                 return fetch_task_result.to_dict()
 
             # Try to acquire the lock for this task
             try:
+                fetch_task_result.lock = self.get_lock_name()
                 self.get_lock_manager().lock_acquire()
             except Exception as e:
                 fetch_task_result.reason = str(e)
                 return fetch_task_result.to_dict()
 
-            self.get_lock_manager().submit(lambda: self.get_blocks())
-            block_from, block_to, current_block = self.get_lock_manager().result()
             events: List[Dict] = []
             fetch_retries = 10
             fetch_delay = 0.1
+
+            self.get_lock_manager().submit(lambda: self.get_blocks())
+            block_from, block_to, current_block = self.get_lock_manager().result()
 
             while fetch_retries > 0:
                 # Get blocks data
@@ -205,25 +240,32 @@ class EventsFetchTask(SmartTask):
                     events=self.sync.event_names,
                 )
                 try:
-                    logger.debug(f'Fetching new events from {block_to - block_from + 1} blocks')
+                    logger.debug(f'Fetching new events from {block_to - block_from} blocks')
                     self.get_lock_manager().submit(lambda: self.contract.get_logs(**fetch_params))
                     events: List[Dict] = self.get_lock_manager().result()
                     self.last_events_count = len(events)
                     logger.debug(f'Fetched {len(events)} new events')
+
+                    # Save effective block range flag
+                    self.sync.sync_block_range_effective = True
+                    self.get_lock_manager().submit(lambda: self.sync.save(update_fields=['sync_block_range_effective']))
+                    self.get_lock_manager().wait_for_futures()
                     break
                 except (Exception, ValueError) as e:
                     logger.error(f'Could not fetch new events: {e.args}')
 
-                    # Figure out next block_to value
+                    # Figure out next block_to value, maybe it is not available in provider
                     if isinstance(e, ValueError) and '-32000' in str(e.args):
                         rpc_response = json.loads(str(e.args))
                         if rpc_response.get('code') in (-32000,):
                             block_to -= 1
+                            block_to = max(block_from, block_to)
                     else:
                         # RPC:-32602 (log size exceeded) and others
                         old_block_to = block_to
-                        block_to = max(block_from, block_to - math.ceil((block_to - block_from) * 0.5))
-                        logger.debug(f'Decreasing block_to from {old_block_to} to {block_to}')
+                        self.get_lock_manager().submit(lambda: self.get_blocks())
+                        block_from, block_to, current_block = self.get_lock_manager().result()
+                        logger.debug(f'Decreasing "block_to" from {old_block_to} to {block_to}')
 
                     # Check if we can retry
                     if fetch_retries > 0:
@@ -241,10 +283,7 @@ class EventsFetchTask(SmartTask):
             if not len(events):
                 # For the case when there is some delay in a node, we need to make sure we don't miss any events
                 # by decrementing block_from by block_from_back_offset
-                if block_to == current_block:
-                    self.sync.last_synced_block_number = current_block - self.block_from_back_offset
-                else:
-                    self.sync.last_synced_block_number = block_to
+                self.sync.last_synced_block_number = block_to
                 self.get_lock_manager().submit(lambda: self.sync.save(update_fields=['last_synced_block_number']))
                 self.get_lock_manager().wait_for_futures()
 
@@ -260,7 +299,7 @@ class EventsFetchTask(SmartTask):
                     params=fetch_params,
                     events=events,
                 ))
-                results: List[EventReceiverResult] = self.get_lock_manager().result()
+                results: List[Any] = self.get_lock_manager().result()
             except Exception as e:
                 fetch_task_result.reason = f'Could not send new events signal to receivers'
                 fetch_task_result.error = str(e)
@@ -275,7 +314,7 @@ class EventsFetchTask(SmartTask):
 
             # If there were events but none of them were saved, try again later with back offset
             if not can_self_call and block_to == current_block and block_to != block_from:
-                self.sync.last_synced_block_number = block_to - self.block_from_back_offset
+                self.sync.last_synced_block_number = block_to
                 self.get_lock_manager().submit(lambda: self.sync.save(update_fields=['last_synced_block_number']))
                 self.get_lock_manager().wait_for_futures()
 

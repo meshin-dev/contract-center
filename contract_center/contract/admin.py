@@ -21,6 +21,8 @@ class SyncAdmin(ModelAdmin):
                     'process_from_block',
                     'process_block_range',
                     'sync_block_range',
+                    'sync_block_range_effective',
+                    'sync_block_range_effective_multiplier',
                     'contract_genesis_block',
                     'genesis_event_name',
                 )

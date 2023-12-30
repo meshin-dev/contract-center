@@ -1,10 +1,13 @@
+import hashlib
 import json
 import logging
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Union, List, Dict
+from enum import Enum
+from typing import Union, List, Dict, NewType, Type
 
+from eth_typing import ChecksumAddress
 from torch.multiprocessing import Manager
 from web3 import Web3, HTTPProvider, WebsocketProvider
 from web3._utils.abi import abi_to_signature
@@ -18,24 +21,154 @@ from contract_center.contract.web3.events import sanitize_events
 logger = logging.getLogger(__name__)
 
 
+class ConnectionType(Enum):
+    HTTP = 'HTTP'
+    WEBSOCKET = 'WEBSOCKET'
+
+
+ContractUID = NewType('ContractUID', str)
+
+
 class Web3Contract:
     """
-    High-level contract for easy interaction with blockchain
+    High-level Web3 contract interface for easy interaction with blockchain.
+    TODO: When using this class in periodic tasks - great idea would be to build registry of them,
+          to keep websocket connection alive instead of instantiating it per periodic task
     """
-    name: str
-    contract_address: str
-    contract_abi: Dict
-    web3_http: Web3
-    web3_websocket: Dict[str, Web3] = {}
-    http: Contract
-    websocket: Dict[str, Contract] = {}
+    # Node addresses
+    node_http_address: str = ''
+    node_websocket_address: str = ''
 
-    def __init__(self,
-                 name: str,
-                 node_http_address: str,
-                 node_websocket_address: str,
-                 contract_address: str,
-                 contract_abi: Union[str, dict]):
+    # Web3 instances
+    web3_http: Union[None, Web3] = None
+    web3_websocket: Dict[ContractUID, Web3] = dict()
+
+    # Contract settings
+    contract_abi: Dict = dict()
+    contract_address: Union[None, ChecksumAddress] = None
+
+    # Contract instances
+    http_contract: Union[None, Union[Type[Contract], Contract]] = None
+    websocket_contract: Dict[ContractUID, Union[Type[Contract], Contract]] = dict()
+
+    # Executor
+    executor: Union[None, ThreadPoolExecutor] = None
+
+    def set_node_http_address(self, node_http_address: str) -> 'Web3Contract':
+        """
+        Setting node http address
+        :param node_http_address:
+        :return:
+        """
+        self.node_http_address = node_http_address
+        self.connect(force_http=True)
+        return self
+
+    def set_node_websocket_address(self, node_websocket_address: str) -> 'Web3Contract':
+        """
+        Setting node websocket address
+        :param node_websocket_address:
+        :return:
+        """
+        self.node_websocket_address = node_websocket_address
+        self.connect(force_websocket=True)
+        return self
+
+    @property
+    def contract_uid(self) -> ContractUID:
+        """
+        Build unique contract instance hash based on address and ABI
+        :return:
+        """
+        if not self._contract_uid:
+            self._contract_uid = ContractUID(
+                hashlib.sha256(
+                    str(self.contract_abi).encode() + str(self.contract_address).encode()
+                ).hexdigest()
+            )
+        return self._contract_uid
+
+    def connect(self, force: bool = False, force_http: bool = False, force_websocket: bool = False) -> 'Web3Contract':
+        """
+        Create instances of Web3 http and websocket only if not created yet or if forced
+        :param force_websocket:
+        :param force_http:
+        :param force:
+        :return:
+        """
+        if all([self.node_http_address, any([force, force_http, not self.web3_http])]):
+            self.web3_http = Web3(HTTPProvider(self.node_http_address))
+            # Only necessary for PoA chains
+            self.web3_http.middleware_onion.inject(geth_poa_middleware, layer=0)
+
+        web3_socket = Web3Contract.web3_websocket.get(self.contract_uid)
+        if all([self.node_websocket_address, any([force, force_websocket, not web3_socket])]):
+            Web3Contract.web3_websocket[self.contract_uid] = Web3(WebsocketProvider(self.node_websocket_address))
+            # Only necessary for PoA chains
+            Web3Contract.web3_websocket[self.contract_uid].middleware_onion.inject(geth_poa_middleware, layer=0)
+        return self
+
+    @property
+    def websocket_connection(self) -> Union[None, Web3]:
+        """
+        Creates web3 websocket connection
+        :return:
+        """
+        self.connect()
+        return Web3Contract.web3_websocket.get(self.contract_uid)
+
+    @property
+    def http_connection(self) -> Union[None, Web3]:
+        """
+        Creates web3 http connection
+        :return:
+        """
+        self.connect()
+        return self.web3_http
+
+    def connection(self, connection_type: ConnectionType = ConnectionType.WEBSOCKET) -> Web3:
+        """
+        Creates web3 instance based on connection type
+        :param connection_type:
+        :return:
+        """
+        connections = {
+            ConnectionType.HTTP: self.http_connection,
+            ConnectionType.WEBSOCKET: self.websocket_connection,
+        }
+        connection = connections.get(connection_type)
+        if not connection:
+            raise ValueError(f'This connection type unavailable. Provide {str(connection_type.value).lower()} address')
+        return connection
+
+    def contract(self, connection_type: ConnectionType = ConnectionType.WEBSOCKET) -> Contract:
+        """
+        Returns contract instance based on http or websocket web3 provider connection
+        :param connection_type:
+        :return:
+        """
+        # Websocket provider contract
+        if connection_type == ConnectionType.WEBSOCKET:
+            if Web3Contract.websocket_contract.get(self.contract_uid):
+                return Web3Contract.websocket_contract.get(self.contract_uid)
+            else:
+                contract = self.connection(connection_type=connection_type).eth.contract(
+                    address=self.contract_address,
+                    abi=self.contract_abi,
+                )
+                Web3Contract.websocket_contract[self.contract_uid] = contract
+                return Web3Contract.websocket_contract.get(self.contract_uid)
+
+        # Http provider contract
+        if not self.http_contract:
+            self.http_contract = self.connection(connection_type=connection_type).eth.contract(
+                address=self.contract_address,
+                abi=self.contract_abi,
+            )
+        return self.http_contract
+
+    def __init__(self, contract_address: str, contract_abi: Union[str, dict], node_http_address: str = None,
+                 node_websocket_address: str = None):
         """
         Receives all necessary information to create both websocket and http providers,
         contracts and web3 instances
@@ -44,89 +177,53 @@ class Web3Contract:
         :param contract_address:
         :param contract_abi:
         """
-        self.name = name
-        self.contract_address = contract_address
-        self.contract_abi = json.loads(contract_abi) if isinstance(contract_abi, str) else contract_abi
-        self.executor = None
+        self._contract_uid = ''
+        contract_abi = json.loads(contract_abi) if isinstance(contract_abi, str) else contract_abi
 
-        if not self.contract_abi:
-            raise ValueError('Provide either string or dict ABI for contract')
+        if not contract_abi:
+            raise ValueError('Contract ABI should be either JSON string or python dict')
+        self.contract_abi = contract_abi
 
-        # Web3 instances
-        self.web3_http = Web3(HTTPProvider(node_http_address))
-        self.web3_websocket[self.name] = Web3(WebsocketProvider(node_websocket_address))
+        if not Web3.is_checksum_address(contract_address):
+            raise ValueError('Contract address should be valid checksum address')
+        self.contract_address = Web3.to_checksum_address(contract_address)
 
-        # Only necessary for PoA chains
-        self.web3_http.middleware_onion.inject(geth_poa_middleware, layer=0)
-        self.web3_websocket[self.name].middleware_onion.inject(geth_poa_middleware, layer=0)
-
-        # Contract instances
-        self.http = self.web3_http.eth.contract(
-            address=Web3.to_checksum_address(contract_address),
-            abi=self.contract_abi
-        )
-        Web3Contract.websocket[self.name] = self.web3_websocket[self.name].eth.contract(
-            address=Web3.to_checksum_address(contract_address),
-            abi=self.contract_abi
-        )
+        # Set available addresses and connect
+        self.set_node_http_address(node_http_address)
+        self.set_node_websocket_address(node_websocket_address)
 
     def get_genesis_block_number(
         self,
         block_from: int = 0,
-        source: str = 'http',
+        connection_type: ConnectionType = ConnectionType.HTTP,
         genesis_event_name: str = GENESIS_EVENT_NAME_DEFAULT
     ) -> Union[None, int]:
         """
         Tries to get the block number when the contract has been initialized.
         :return:
         """
-        source = Web3Contract.websocket[self.name] if source == 'websocket' else self.http
-        past_events = getattr(source.events, genesis_event_name).get_logs(fromBlock=block_from)
+        contract = self.contract(connection_type=connection_type)
+        past_events = getattr(contract.events, genesis_event_name).get_logs(fromBlock=block_from)
         first_event = past_events[0] if past_events else None
         return int(first_event['blockNumber']) if first_event else None
-
-    @staticmethod
-    def estimate_next_chunk_size(
-        current_chunk_size: int,
-        event_found_count: int,
-        min_scan_chunk_size: int = 10,
-        max_scan_chunk_size: int = 1000
-    ) -> int:
-        """
-        Estimate the optimal chunk size based on the event density in the current chunk.
-
-        * As more data exists in a smaller chunk, we should request a smaller size next time.
-        * As less data exists in a larger chunk, we should request a larger size next time.
-        * The aim is to balance the chunk size to skip empty chunks faster and work with smaller chunks when there's more data.
-        * This is done by halving the chunk size when event density is above 0.3 and doubling it when event density is below 0.1.
-        * Chunk size is capped at the min and max scan chunk sizes.
-        """
-
-        # Calculate event density
-        event_density = event_found_count / current_chunk_size
-
-        # Adjust chunk size based on event density
-        if event_density > 0.3:
-            next_chunk_size = current_chunk_size / 2
-        elif event_density < 0.1:
-            next_chunk_size = current_chunk_size * 2
-        else:
-            next_chunk_size = current_chunk_size
-
-        # Cap chunk size at the min and max scan chunk sizes
-        next_chunk_size = max(min_scan_chunk_size, next_chunk_size)
-        next_chunk_size = min(max_scan_chunk_size, next_chunk_size)
-
-        return int(math.ceil(next_chunk_size))
 
     def get_logs(
         self,
         block_from: int,
         block_to: int,
-        source: str = 'http',
+        connection_type: ConnectionType = ConnectionType.HTTP,
         *args,
         **kwargs,
     ):
+        """
+        Get logs between two block numbers for contract address using filters builder
+        :param block_from:
+        :param block_to:
+        :param connection_type:
+        :param args:
+        :param kwargs:
+        :return:
+        """
         # Define the filter parameters
         filter_params = {
             "fromBlock": block_from,
@@ -135,8 +232,8 @@ class Web3Contract:
         }
 
         # Create the filter
-        web3 = self.web3_websocket[self.name] if source == 'websocket' else self.web3_http
-        filters = web3.eth.filter(filter_params)
+        connection = self.connection(connection_type=connection_type)
+        filters = connection.eth.filter(filter_params)
 
         # Fetch the logs
         try:
@@ -147,7 +244,7 @@ class Web3Contract:
             # @url https://eips.ethereum.org/EIPS/eip-1474
             if error_code == -32000 or 'filter not found' in str(error_details):
                 # Recreate the filter
-                filters = web3.eth.filter(filter_params)
+                filters = connection.eth.filter(filter_params)
                 logs = filters.get_all_entries()
             else:
                 raise
@@ -160,7 +257,7 @@ class Web3Contract:
         block_to: int,
         max_retries: int = 3,
         retry_delay: int = 1,
-        source: str = 'http'
+        connection_type: ConnectionType = ConnectionType.HTTP
     ):
         """
         Fetches for specific event in range of blocks. If the attempt to fetch logs fails,
@@ -171,17 +268,17 @@ class Web3Contract:
         :param block_to: Ending block number for the range of blocks.
         :param max_retries: Maximum number of retries if fetching fails. Defaults to 3.
         :param retry_delay: How long to wait before next retry. Defaults to 1 second
-        :param source: Use websocket by default or http source to get the data
+        :param connection_type: Use websocket by default or http source to get the data
 
         :return: A list of event logs fetched from the specified range of blocks.
 
         :raises: The last exception caught if all retries fail.
         """
-        source = Web3Contract.websocket[self.name] if source == 'websocket' else self.http
+        contract = self.contract(connection_type=connection_type)
         while max_retries:
             try:
                 logger.debug(f'Loading history for event: {event} in range: {block_from}-{block_to} ...')
-                return getattr(source.events, event).get_logs(
+                return getattr(contract.events, event).get_logs(
                     fromBlock=block_from,
                     toBlock=block_to,
                 )
@@ -199,7 +296,7 @@ class Web3Contract:
         max_retries: int = 3,
         retry_delay: int = 1,
         default_max_workers: int = 5,
-        source: str = 'http'
+        source: str = ConnectionType.HTTP
     ) -> List[Dict]:
         """
         Fetches specific list of events blocks range using multi-threading.
